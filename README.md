@@ -1,15 +1,13 @@
-# Cali PWA Agency — Standalone Android APK
+# Cali — PWA AI Agency (`v0.2.0`)
 
-Autonomous 13-agent PWA coding studio overseen by **Cali** (Executive Director with Text Chat + Gemini Live Voice) running on **5 separate Gemini API keys** (`KEY_CALI` + `K1`–`K4`).
+Standalone Android APK & Web PWA combining **Cali** (Executive Director with Onboarding, Self-Learning Memory, and Gemini Live Voice) with a **13-Agent Phased Coding Agency** powered by **5 Gemini API Keys** (`KEY_CALI` + `K1`–`K4`) and a **16-bit Pixel-Art Virtual Office**.
 
-## Export as Android APK via GitHub Actions
-1. Create a new GitHub repository and push all files from this folder to the `main` branch.
-2. Open the **Actions** tab on GitHub and wait for **Build Sideloadable Android APK** to finish (~3–4 minutes).
-3. Download the **`cali-pwa-agency-debug-apk`** artifact, unzip it, and sideload `app-debug.apk` onto your Android phone.
-
-## First-Launch Setup (On-Device)
-1. Tap the **Settings** icon (top right) and enter your 5 Gemini API keys (stored locally on your phone, never uploaded to Git):
-   - **Cali Key (`KEY_CALI`):** Dedicated to Cali onboarding, chat, background triage, and Gemini Live voice.
-   - **Worker Keys (`K1`–`K4`):** Round-robin pool for the 13 coding agents (use 4 separate Google Cloud projects for independent quotas).
-2. Complete Cali's 4-step **Executive Onboarding** interview so she learns your taste, stack preferences, and approval boundaries.
-3. Open the **Virtual Office** drawer to watch your 13 agents walk, code, hand off packets, and recover automatically via the smart Watchdog.
+## Features (`v0.2.0`)
+- **Cali Monolith HQ UI:** Full Monolith, Nocturne, and Alabaster themes + 4 text accents across every screen, modal, and drawer.
+- **16-Bit Pixel-Art Virtual Office:** Sprite-animated chibi agents (walking, typing, blinking), glowing packet handoffs, dark status pills, and tap-to-inspect sheets.
+- **5-Key Pool & Smart Watchdog:** Dedicated `KEY_CALI` + 4 round-robin worker keys with rolling 60s RPM, daily RPD, token & context window telemetry, 60s `429` cooldowns, and auto-resume when keys recover.
+- **Verbatim 13-Agent Prompts + Prompt Studio:** All 13 agency prompts + Cali prompts bundled offline and live-editable inside the app.
+- **Multi-Project Switcher & Blueprint Importer:** Run multiple projects, paste/upload `.md` blueprints, or launch 3 one-tap starter templates.
+- **In-App Live PWA Previewer + Debugger Hook:** Preview generated HTML/JS apps in a sandboxed iframe with a live JS console and 1-tap *Send Error to 09. Debugger*.
+- **1-Tap Ship to GitHub + `.zip` Export:** Download the generated workspace as a `.zip` or push directly to a GitHub repository via PAT.
+- **Zero-Quota Demo Sprint Mode:** Simulate a full 13-agent sprint, pixel handoffs, and Watchdog recovery without spending API quota.

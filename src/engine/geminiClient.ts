@@ -1,62 +1,132 @@
-import { GoogleGenAI } from '@google/genai';
-import type { ThinkingLevel } from '../types/agency';
+import type { KeySlotId, ThinkingLevel } from '../types/agency';
+import { keyPool } from './keyPool';
 
-export const FLASH_LITE_MODEL = 'gemini-3.1-flash-lite';
-
-export interface GeminiJsonCall {
-  apiKey: string;
-  systemInstruction: string;
+export interface GeminiCallOptions {
+  keyId: KeySlotId;
+  systemPrompt: string;
   userPayload: string;
-  thinkingLevel: ThinkingLevel;
+  thinkingLevel?: ThinkingLevel;
+  model?: string;
+  temperature?: number;
   timeoutMs?: number;
 }
 
-export class GeminiApiError extends Error {
-  public httpStatus: number;
-  constructor(message: string, httpStatus: number) {
-    super(message);
-    this.httpStatus = httpStatus;
-  }
+export interface GeminiUsage {
+  promptTokens: number;
+  outputTokens: number;
+  totalTokens: number;
 }
 
-export async function callGeminiJson<T>(opts: GeminiJsonCall): Promise<T> {
-  const ai = new GoogleGenAI({ apiKey: opts.apiKey });
-  const timeoutMs = opts.timeoutMs ?? 55_000;
+export interface GeminiJsonResult<T = unknown> {
+  data: T;
+  usage: GeminiUsage;
+  finishReason: string;
+}
+
+const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
+
+function extractJsonString(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return trimmed;
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced && fenced[1]) return fenced[1].trim();
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1);
+  }
+  return trimmed;
+}
+
+export async function callGeminiJson<T = Record<string, unknown>>(opts: GeminiCallOptions): Promise<GeminiJsonResult<T>> {
+  const slot = keyPool.getSlot(opts.keyId);
+  if (!slot.apiKey) {
+    throw new Error(`API key ${opts.keyId} is not configured.`);
+  }
+
+  const model = opts.model || DEFAULT_MODEL;
+  const isAq = slot.apiKey.startsWith('AQ.');
+  const url = isAq
+    ? `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
+    : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(slot.apiKey)}`;
+
+  const headers: Record<string, string> = isAq
+    ? { 'Content-Type': 'application/json', Authorization: `Bearer ${slot.apiKey}`, 'x-goog-api-key': slot.apiKey }
+    : { 'Content-Type': 'application/json' };
+
+  const generationConfig: Record<string, unknown> = {
+    temperature: opts.temperature ?? 0.35,
+    responseMimeType: 'application/json'
+  };
+
+  if (opts.thinkingLevel) {
+    generationConfig.thinkingConfig = {
+      thinkingLevel: opts.thinkingLevel.toUpperCase()
+    };
+  }
 
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = window.setTimeout(() => controller.abort(), opts.timeoutMs ?? 55_000);
 
   try {
-    const response = await Promise.race([
-      ai.models.generateContent({
-        model: FLASH_LITE_MODEL,
-        contents: opts.userPayload,
-        config: {
-          systemInstruction: opts.systemInstruction,
-          responseMimeType: 'application/json',
-          thinkingConfig: {
-            thinkingLevel: opts.thinkingLevel as any
-          }
-        }
-      }),
-      new Promise<never>((_, reject) => {
-        controller.signal.addEventListener('abort', () =>
-          reject(new GeminiApiError('Request timed out after 55s', 408))
-        );
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: opts.systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: opts.userPayload }] }],
+        generationConfig
       })
-    ]);
+    });
 
-    const rawText = response.text?.trim() || '';
-    if (!rawText) {
-      throw new GeminiApiError('Empty response from Gemini', 502);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      keyPool.recordFailure(opts.keyId, res.status, errText || `HTTP ${res.status}`);
+      throw new Error(`Gemini HTTP ${res.status}${errText ? `: ${errText.slice(0, 140)}` : ''}`);
     }
-    const clean = rawText.replace(/^\`\`\`json\s*/i, '').replace(/\`\`\`$/, '').trim();
-    return JSON.parse(clean) as T;
-  } catch (err: any) {
-    if (err instanceof GeminiApiError) throw err;
-    const status = Number(err?.status || err?.code || (String(err?.message).includes('429') ? 429 : 500));
-    throw new GeminiApiError(err?.message || 'Gemini API request failed', status);
+
+    const payload = (await res.json()) as {
+      candidates?: Array<{
+        finishReason?: string;
+        content?: { parts?: Array<{ text?: string }> };
+      }>;
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        totalTokenCount?: number;
+      };
+    };
+
+    const candidate = payload.candidates?.[0];
+    const finishReason = candidate?.finishReason || 'STOP';
+    const rawText = candidate?.content?.parts?.map((p) => p.text || '').join('') || '';
+    const usage: GeminiUsage = {
+      promptTokens: Number(payload.usageMetadata?.promptTokenCount || Math.ceil(opts.userPayload.length / 4)),
+      outputTokens: Number(payload.usageMetadata?.candidatesTokenCount || Math.ceil(rawText.length / 4)),
+      totalTokens: Number(payload.usageMetadata?.totalTokenCount || 0)
+    };
+    if (!usage.totalTokens) usage.totalTokens = usage.promptTokens + usage.outputTokens;
+
+    keyPool.recordSuccess(opts.keyId, usage);
+
+    if (finishReason === 'MAX_TOKENS') {
+      throw new Error('MAX_TOKENS');
+    }
+    if (!rawText) {
+      throw new Error('Empty response text from Gemini');
+    }
+
+    const cleanJson = extractJsonString(rawText);
+    const parsed = JSON.parse(cleanJson) as T;
+    return { data: parsed, usage, finishReason };
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      keyPool.recordFailure(opts.keyId, 504, '55s HTTP Timeout');
+      throw new Error('TIMEOUT_55S');
+    }
+    throw err;
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timeout);
   }
 }

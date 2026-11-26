@@ -1,145 +1,300 @@
-import type { ApiKeySlot, KeySlotId } from '../types/agency';
-import { storage } from './storage';
+import type { KeySlotId, KeySlotState, TelemetrySummary } from '../types/agency';
 
-type Listener = (slots: ApiKeySlot[]) => void;
-type RecoveryCallback = (recoveredKeys: KeySlotId[]) => void;
+const STORAGE_KEY = 'cali_agency_5keys_v020';
+const MAX_CONTEXT_WINDOW = 1_048_576; // 1M context window for Gemini Flash-Lite
+const COOLDOWN_429_MS = 60_000;
 
-export class KeyPoolManager {
-  private slots: ApiKeySlot[];
-  private rrCursor = 0;
-  private listeners = new Set<Listener>();
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function makeDefaultSlots(): Record<KeySlotId, KeySlotState> {
+  const today = todayKey();
+  const base = (id: KeySlotId, label: string, role: 'cali' | 'worker'): KeySlotState => ({
+    id,
+    label,
+    role,
+    apiKey: '',
+    status: 'UNSET',
+    cooldownUntil: null,
+    backoffMs: 15_000,
+    rpmTimestamps: [],
+    rpdCount: 0,
+    rpdDate: today,
+    promptTokens: 0,
+    outputTokens: 0,
+    lastContextTokens: 0,
+    lastError: null,
+    lastAgent: null
+  });
+  return {
+    KEY_CALI: base('KEY_CALI', 'Cali Dedicated', 'cali'),
+    K1: base('K1', 'Worker Key 1', 'worker'),
+    K2: base('K2', 'Worker Key 2', 'worker'),
+    K3: base('K3', 'Worker Key 3', 'worker'),
+    K4: base('K4', 'Worker Key 4', 'worker')
+  };
+}
+
+export class FiveKeyPool {
+  private slots: Record<KeySlotId, KeySlotState>;
+  private rrIndex = 0;
+  private workerOrder: KeySlotId[] = ['K1', 'K2', 'K3', 'K4'];
+  private listeners = new Set<() => void>();
   private watchdogTimer: number | null = null;
-  private backoffMs = 15000;
-  private onRecovered: RecoveryCallback | null = null;
+  private onWatchdogRecover: ((keyId: KeySlotId) => void) | null = null;
+  private tickTimer: number | null = null;
 
   constructor() {
-    this.slots = storage.loadKeys();
+    this.slots = this.load();
+    this.tickTimer = window.setInterval(() => this.pruneAndRefresh(), 1000);
   }
 
-  public subscribe(fn: Listener): () => void {
+  public subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
-    fn(this.getSnapshot());
     return () => this.listeners.delete(fn);
   }
 
-  public setRecoveryHandler(cb: RecoveryCallback): void {
-    this.onRecovered = cb;
+  private emit(): void {
+    this.save();
+    this.listeners.forEach((fn) => fn());
   }
 
-  public getSnapshot(): ApiKeySlot[] {
+  private load(): Record<KeySlotId, KeySlotState> {
+    const defaults = makeDefaultSlots();
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw) as Partial<Record<KeySlotId, Partial<KeySlotState>>>;
+      const today = todayKey();
+      (Object.keys(defaults) as KeySlotId[]).forEach((id) => {
+        const s = parsed[id];
+        if (!s) return;
+        const apiKey = typeof s.apiKey === 'string' ? s.apiKey.trim() : '';
+        const sameDay = s.rpdDate === today;
+        defaults[id] = {
+          ...defaults[id],
+          ...s,
+          apiKey,
+          status: apiKey ? (s.status === 'INVALID' ? 'INVALID' : 'READY') : 'UNSET',
+          cooldownUntil: null,
+          rpmTimestamps: [],
+          rpdDate: today,
+          rpdCount: sameDay ? Number(s.rpdCount || 0) : 0,
+          promptTokens: Number(s.promptTokens || 0),
+          outputTokens: Number(s.outputTokens || 0),
+          lastContextTokens: Number(s.lastContextTokens || 0)
+        };
+      });
+    } catch {
+      // ignore corrupt storage
+    }
+    return defaults;
+  }
+
+  private save(): void {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.slots));
+    } catch {
+      // ignore quota error
+    }
+  }
+
+  private pruneAndRefresh(): void {
     const now = Date.now();
     let changed = false;
-    this.slots = this.slots.map((s) => {
-      if (s.status === 'COOLDOWN' && s.cooldownUntil && now >= s.cooldownUntil) {
+    const today = todayKey();
+    for (const id of Object.keys(this.slots) as KeySlotId[]) {
+      const slot = this.slots[id];
+      const beforeRpm = slot.rpmTimestamps.length;
+      slot.rpmTimestamps = slot.rpmTimestamps.filter((ts) => now - ts < 60_000);
+      if (slot.rpmTimestamps.length !== beforeRpm) changed = true;
+
+      if (slot.rpdDate !== today) {
+        slot.rpdDate = today;
+        slot.rpdCount = 0;
         changed = true;
-        return { ...s, status: s.key ? 'READY' : 'UNSET', cooldownUntil: null, lastError: null };
       }
-      return s;
-    });
+
+      if ((slot.status === 'COOLDOWN' || slot.status === 'BACKOFF') && slot.cooldownUntil && now >= slot.cooldownUntil) {
+        slot.status = slot.apiKey ? 'READY' : 'UNSET';
+        slot.cooldownUntil = null;
+        changed = true;
+      }
+    }
     if (changed) this.emit();
-    return this.slots.map((s) => ({ ...s }));
   }
 
-  public updateKey(id: KeySlotId, rawKey: string): void {
-    const trimmed = rawKey.trim();
-    this.slots = this.slots.map((s) =>
-      s.id === id
-        ? { ...s, key: trimmed, status: trimmed ? 'READY' : 'UNSET', cooldownUntil: null, lastError: null }
-        : s
-    );
-    storage.saveKeys(this.slots);
+  public setKey(id: KeySlotId, rawKey: string): void {
+    const clean = rawKey.trim();
+    const slot = this.slots[id];
+    slot.apiKey = clean;
+    slot.status = clean ? 'READY' : 'UNSET';
+    slot.cooldownUntil = null;
+    slot.lastError = null;
     this.emit();
   }
 
-  public getCaliKey(): ApiKeySlot | null {
-    const slot = this.getSnapshot().find((s) => s.id === 'KEY_CALI');
-    return slot && slot.key ? slot : null;
+  public getAll(): KeySlotState[] {
+    return (['KEY_CALI', 'K1', 'K2', 'K3', 'K4'] as KeySlotId[]).map((id) => ({ ...this.slots[id] }));
   }
 
-  public acquireWorkerKey(agentId: string): ApiKeySlot | null {
-    const workers = this.getSnapshot().filter((s) => s.role === 'worker');
-    for (let i = 0; i < workers.length; i++) {
-      const idx = (this.rrCursor + i) % workers.length;
-      const candidate = workers[idx];
-      if (candidate.key && candidate.status === 'READY') {
-        this.rrCursor = (idx + 1) % workers.length;
-        this.mutateSlot(candidate.id, {
-          status: 'ACTIVE',
-          activeAgentId: agentId,
-          rpmCount: candidate.rpmCount + 1,
-          rpdCount: candidate.rpdCount + 1
-        });
-        return this.slots.find((s) => s.id === candidate.id)!;
+  public getSlot(id: KeySlotId): KeySlotState {
+    return { ...this.slots[id] };
+  }
+
+  public getCaliKey(): KeySlotState | null {
+    const cali = this.slots.KEY_CALI;
+    if (cali.apiKey && cali.status !== 'INVALID' && cali.status !== 'COOLDOWN') return cali;
+    // Fallback to any ready worker key if KEY_CALI is unset
+    for (const id of this.workerOrder) {
+      if (this.slots[id].apiKey && this.slots[id].status === 'READY') return this.slots[id];
+    }
+    return null;
+  }
+
+  public acquireWorkerKey(agentId: string): KeySlotState | null {
+    this.pruneAndRefresh();
+    for (let i = 0; i < this.workerOrder.length; i++) {
+      const idx = (this.rrIndex + i) % this.workerOrder.length;
+      const id = this.workerOrder[idx];
+      const slot = this.slots[id];
+      if (slot.apiKey && slot.status === 'READY') {
+        this.rrIndex = (idx + 1) % this.workerOrder.length;
+        slot.status = 'ACTIVE';
+        slot.lastAgent = agentId;
+        this.emit();
+        return slot;
       }
     }
     return null;
   }
 
-  public releaseKey(id: KeySlotId): void {
-    const slot = this.slots.find((s) => s.id === id);
-    if (!slot) return;
-    if (slot.status === 'ACTIVE') {
-      this.mutateSlot(id, { status: slot.key ? 'READY' : 'UNSET', activeAgentId: null });
+  public recordSuccess(id: KeySlotId, usage?: { promptTokens?: number; outputTokens?: number; totalTokens?: number }): void {
+    const slot = this.slots[id];
+    const now = Date.now();
+    slot.status = slot.apiKey ? 'READY' : 'UNSET';
+    slot.cooldownUntil = null;
+    slot.backoffMs = 15_000;
+    slot.lastError = null;
+    slot.rpmTimestamps = [...slot.rpmTimestamps.filter((ts) => now - ts < 60_000), now];
+    slot.rpdCount += 1;
+    if (usage) {
+      const p = Number(usage.promptTokens || 0);
+      const o = Number(usage.outputTokens || 0);
+      slot.promptTokens += p;
+      slot.outputTokens += o;
+      slot.lastContextTokens = p + o;
     }
+    this.emit();
   }
 
-  public reportKeyError(id: KeySlotId, httpStatus: number, message: string): void {
+  public recordFailure(id: KeySlotId, httpStatus: number, message: string): void {
+    const slot = this.slots[id];
+    slot.lastError = message.slice(0, 140);
     if (httpStatus === 401 || httpStatus === 403) {
-      this.mutateSlot(id, { status: 'INVALID', activeAgentId: null, lastError: 'Invalid or revoked API key' });
-      return;
+      slot.status = 'INVALID';
+      slot.cooldownUntil = null;
+    } else if (httpStatus === 429) {
+      slot.status = 'COOLDOWN';
+      slot.cooldownUntil = Date.now() + COOLDOWN_429_MS;
+    } else {
+      slot.status = 'BACKOFF';
+      slot.cooldownUntil = Date.now() + slot.backoffMs;
+      slot.backoffMs = Math.min(slot.backoffMs * 2, 120_000);
     }
-    if (httpStatus === 429) {
-      const isDaily = /daily|quota|rpd/i.test(message);
-      this.mutateSlot(id, {
-        status: isDaily ? 'RPD_EXHAUSTED' : 'COOLDOWN',
-        cooldownUntil: isDaily ? Date.now() + 15 * 60_000 : Date.now() + 60_000,
-        activeAgentId: null,
-        lastError: isDaily ? 'Daily quota reached' : 'Rate limited (60s cooldown)'
-      });
-      return;
-    }
-    this.mutateSlot(id, {
-      status: 'OFFLINE',
-      cooldownUntil: Date.now() + 20_000,
-      activeAgentId: null,
-      lastError: message.slice(0, 90)
-    });
+    this.emit();
   }
 
-  public areAllWorkersUnavailable(): boolean {
-    const configured = this.getSnapshot().filter((s) => s.role === 'worker' && Boolean(s.key));
-    if (configured.length === 0) return true;
-    return configured.every((s) => s.status !== 'READY' && s.status !== 'ACTIVE');
+  public simulateCooldown(id: KeySlotId, seconds = 12): void {
+    const slot = this.slots[id];
+    slot.status = 'COOLDOWN';
+    slot.cooldownUntil = Date.now() + seconds * 1000;
+    slot.lastError = 'Simulated 429 RESOURCE_EXHAUSTED';
+    this.emit();
   }
 
-  public startWatchdog(): void {
-    if (this.watchdogTimer !== null) return;
-    this.backoffMs = 15_000;
-    const tick = async () => {
-      const recovered: KeySlotId[] = [];
-      const workers = this.getSnapshot().filter((s) => s.role === 'worker' && Boolean(s.key));
-      for (const w of workers) {
-        if (w.status === 'INVALID') continue;
-        if (w.status === 'READY') {
-          recovered.push(w.id);
-          continue;
-        }
-        if (w.cooldownUntil && Date.now() < w.cooldownUntil) continue;
-        const ok = await this.probeKeyMetadata(w.key);
-        if (ok) {
-          this.mutateSlot(w.id, { status: 'READY', cooldownUntil: null, lastError: null });
-          recovered.push(w.id);
-        }
+  public getTelemetry(): TelemetrySummary {
+    const all = this.getAll();
+    let totalPromptTokens = 0;
+    let totalOutputTokens = 0;
+    let activeRpm = 0;
+    let totalRpd = 0;
+    let lastCallContextTokens = 0;
+
+    for (const s of all) {
+      totalPromptTokens += s.promptTokens;
+      totalOutputTokens += s.outputTokens;
+      activeRpm += s.rpmTimestamps.length;
+      totalRpd += s.rpdCount;
+      if (s.lastContextTokens > lastCallContextTokens) {
+        lastCallContextTokens = s.lastContextTokens;
       }
-      if (recovered.length > 0) {
-        this.stopWatchdog();
-        if (this.onRecovered) this.onRecovered(recovered);
-        return;
-      }
-      this.backoffMs = Math.min(this.backoffMs * 2, 120_000);
-      this.watchdogTimer = window.setTimeout(tick, this.backoffMs);
+    }
+    const totalTokens = totalPromptTokens + totalOutputTokens;
+    const contextPercent = Math.min(100, Number(((lastCallContextTokens / MAX_CONTEXT_WINDOW) * 100).toFixed(2)));
+    return {
+      totalPromptTokens,
+      totalOutputTokens,
+      totalTokens,
+      activeRpm,
+      totalRpd,
+      maxContextTokens: MAX_CONTEXT_WINDOW,
+      lastCallContextTokens,
+      contextPercent
     };
-    this.watchdogTimer = window.setTimeout(tick, this.backoffMs);
+  }
+
+  public async testKeyHealth(id: KeySlotId): Promise<{ ok: boolean; status: number; detail: string }> {
+    const slot = this.slots[id];
+    if (!slot.apiKey) return { ok: false, status: 0, detail: 'Unset' };
+    try {
+      const isAq = slot.apiKey.startsWith('AQ.');
+      const url = isAq
+        ? 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite?fields=name'
+        : `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(slot.apiKey)}`;
+      const headers: Record<string, string> = isAq
+        ? { Authorization: `Bearer ${slot.apiKey}`, 'x-goog-api-key': slot.apiKey }
+        : {};
+      const res = await fetch(url, { method: 'GET', headers });
+      if (res.ok) {
+        slot.status = 'READY';
+        slot.lastError = null;
+        slot.cooldownUntil = null;
+        this.emit();
+        return { ok: true, status: res.status, detail: 'Healthy' };
+      }
+      const txt = await res.text().catch(() => '');
+      this.recordFailure(id, res.status, txt || `HTTP ${res.status}`);
+      return { ok: false, status: res.status, detail: `HTTP ${res.status}` };
+    } catch (err) {
+      const msg = (err as Error).message || 'Network error';
+      this.recordFailure(id, 503, msg);
+      return { ok: false, status: 503, detail: msg };
+    }
+  }
+
+  public startWatchdog(onRecover: (keyId: KeySlotId) => void): void {
+    this.stopWatchdog();
+    this.onWatchdogRecover = onRecover;
+    const poll = async () => {
+      this.pruneAndRefresh();
+      for (const id of this.workerOrder) {
+        const slot = this.slots[id];
+        if (!slot.apiKey || slot.status === 'INVALID') continue;
+        if (slot.status === 'READY') {
+          const check = await this.testKeyHealth(id);
+          if (check.ok) {
+            const cb = this.onWatchdogRecover;
+            this.stopWatchdog();
+            if (cb) cb(id);
+            return;
+          }
+        }
+      }
+      this.watchdogTimer = window.setTimeout(poll, 10_000);
+    };
+    this.watchdogTimer = window.setTimeout(poll, 8_000);
   }
 
   public stopWatchdog(): void {
@@ -147,29 +302,13 @@ export class KeyPoolManager {
       clearTimeout(this.watchdogTimer);
       this.watchdogTimer = null;
     }
+    this.onWatchdogRecover = null;
   }
 
-  private async probeKeyMetadata(apiKey: string): Promise<boolean> {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite?key=${encodeURIComponent(apiKey)}`
-      );
-      return res.ok;
-    } catch {
-      return false;
-    }
-  }
-
-  private mutateSlot(id: KeySlotId, patch: Partial<ApiKeySlot>): void {
-    this.slots = this.slots.map((s) => (s.id === id ? { ...s, ...patch } : s));
-    storage.saveKeys(this.slots);
-    this.emit();
-  }
-
-  private emit(): void {
-    const snap = this.slots.map((s) => ({ ...s }));
-    this.listeners.forEach((fn) => fn(snap));
+  public destroy(): void {
+    this.stopWatchdog();
+    if (this.tickTimer !== null) clearInterval(this.tickTimer);
   }
 }
 
-export const keyPool = new KeyPoolManager();
+export const keyPool = new FiveKeyPool();

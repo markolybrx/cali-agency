@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.cali.pwaagency',
-  appName: 'Cali Agency',
+  appId: 'app.cali.pwaagency',
+  appName: 'Cali PWA Agency',
   webDir: 'dist',
   server: {
     androidScheme: 'https'
