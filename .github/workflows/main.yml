@@ -24,6 +24,36 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Cache Gradle Packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Configure Google Maven Central Mirror (Avoid 429)
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat << 'GRADLE_EOF' > ~/.gradle/init.d/maven-mirror.gradle
+          allprojects {
+            buildscript {
+              repositories {
+                maven { url "https://maven-central.storage-download.googleapis.com/maven2/" }
+                google()
+                mavenCentral()
+              }
+            }
+            repositories {
+              maven { url "https://maven-central.storage-download.googleapis.com/maven2/" }
+              google()
+              mavenCentral()
+            }
+          }
+          GRADLE_EOF
+
       - name: Restore Persistent Debug Keystore (if configured)
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
@@ -104,7 +134,7 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon || (sleep 15 && ./gradlew assembleDebug --no-daemon)
 
       - name: Upload Sideloadable APK Artifact
         uses: actions/upload-artifact@v4
