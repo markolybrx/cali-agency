@@ -10,7 +10,9 @@ import type {
   PendingDecision,
   PhaseSnapshot,
   ProjectState,
+  ProjectTarget,
   PromptEntry,
+  StorageDirectoryConfig,
   TelemetrySummary,
   ThemeId,
   UserProfile,
@@ -36,7 +38,7 @@ import {
   saveProjects,
   upsertMemory
 } from './engine/storage';
-import { exportFullStateBackup, parseFullStateBackup } from './engine/localSave';
+import { exportFullStateBackup, getDirectoryTreeSummary, loadStorageConfig, parseFullStateBackup } from './engine/localSave';
 import { loadPrompts, savePromptOverride } from './prompts/agencyPrompts';
 import { runCaliTurn } from './engine/caliDirector';
 import { GeminiLiveClient } from './engine/geminiLive';
@@ -50,6 +52,7 @@ import { ChangelogDrawer } from './components/changelog/ChangelogDrawer';
 import { ConfirmModal, type ConfirmState } from './components/common/ConfirmModal';
 import { ModelPickerModal } from './components/common/ModelPickerModal';
 import { OnboardingGate } from './components/onboarding/OnboardingGate';
+import { DirectoryPickerModal } from './components/common/DirectoryPickerModal';
 
 type TabId = 'office' | 'workspace' | 'prompts' | 'home' | 'telemetry' | 'memory' | 'settings';
 
@@ -111,6 +114,10 @@ export default function App() {
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [blueprintDraft, setBlueprintDraft] = useState('');
+  const [blueprintTarget, setBlueprintTarget] = useState<ProjectTarget>('PWA');
+  const [storageCfg, setStorageCfg] = useState<StorageDirectoryConfig>(() => loadStorageConfig());
+  const [dirModalOpen, setDirModalOpen] = useState(false);
+  const mdFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Chat & Live Voice
   const [chatInput, setChatInput] = useState('');
@@ -150,6 +157,12 @@ export default function App() {
     localStorage.setItem('cali_theme', theme);
     localStorage.setItem('cali_accent', accent);
   }, [theme, accent, t.bodyBg]);
+
+  useEffect(() => {
+    if (profile.onboarding_complete && !storageCfg.configured) {
+      setDirModalOpen(true);
+    }
+  }, [profile.onboarding_complete, storageCfg.configured]);
 
   useEffect(() => {
     return keyPool.subscribe(() => {
@@ -378,14 +391,14 @@ export default function App() {
     }
   };
 
-  const handleLaunchBlueprint = async (md: string) => {
+  const handleLaunchBlueprint = async (md: string, target: ProjectTarget = blueprintTarget) => {
     if (!md.trim()) return;
     setBlueprintModalOpen(false);
     setChatOpen(false);
     setBlueprintDraft('');
     showToast('Master Orchestrator running INTAKE...');
     try {
-      const proj = await orchestratorRef.current!.intakeBlueprint(md, memories);
+      const proj = await orchestratorRef.current!.intakeBlueprint(md, memories, target);
       showToast(`Project "${proj.project_name}" ready!`);
       const hasWorkerKey = keyPool.getAll().some((k) => k.role === 'worker' && k.apiKey);
       if (hasWorkerKey) {
@@ -652,13 +665,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setChatOpen(true)}
-                    className={`px-3 py-1 rounded-full text-[11px] font-semibold cursor-pointer ${t.primaryBtn}`}
-                  >
-                    Chat Cali
-                  </button>
+                  
                   <button
                     type="button"
                     onClick={() => setChangelogOpen(true)}
@@ -1140,6 +1147,27 @@ export default function App() {
                     Save Settings
                   </button>
 
+                  {/* 3B. Local Projects, Cache & Backup Directory */}
+                  <div className={`rounded-3xl border p-4 space-y-2.5 ${t.surface}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-widest opacity-55">
+                        Local Directory Tree
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDirModalOpen(true)}
+                        className="text-[11px] font-semibold text-accent hover:underline cursor-pointer"
+                      >
+                        Change Folder
+                      </button>
+                    </div>
+                    <div className="text-[10px] font-mono opacity-75 space-y-0.5">
+                      <div className="truncate">Projects: {getDirectoryTreeSummary(storageCfg).projects}</div>
+                      <div className="truncate">Cache: {getDirectoryTreeSummary(storageCfg).cache}</div>
+                      <div className="truncate">Backups: {getDirectoryTreeSummary(storageCfg).backups}</div>
+                    </div>
+                  </div>
+
                   {/* 4. Full Local State Backup & Restore */}
                   <div className={`rounded-3xl border p-4 space-y-2.5 ${t.surface}`}>
                     <div className="text-[11px] font-semibold uppercase tracking-widest opacity-55">4. Local State Backup &amp; Restore</div>
@@ -1235,6 +1263,24 @@ export default function App() {
               </div>
             )}
 
+            {/* REACHABLE FLOATING CALI CHAT FAB (Bottom-right above dock) */}
+            {!chatOpen && !voiceOpen && (
+              <button
+                type="button"
+                aria-label="Chat with Cali"
+                title="Chat with Cali"
+                onClick={() => setChatOpen(true)}
+                className="absolute bottom-24 right-4 z-30 w-14 h-14 rounded-full flex items-center justify-center cursor-pointer active:scale-95 transition-transform shadow-2xl"
+              >
+                <span className={`absolute inset-0 rounded-full animate-breathe pointer-events-none ${t.fabHalo}`} />
+                <div className={`relative w-12 h-12 rounded-full flex items-center justify-center border shadow-xl ${t.fabCore}`}>
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85">
+                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                  </svg>
+                </div>
+              </button>
+            )}
+
             {/* 4. ALWAYS-VISIBLE ENLARGED FLOATING BOTTOM DOCK (HOME CENTERED!) */}
             <nav
               aria-label="Primary navigation"
@@ -1323,10 +1369,17 @@ export default function App() {
                           <div className="flex gap-2">
                             <button
                               type="button"
-                              onClick={() => handleLaunchBlueprint(m.blueprintDraft!)}
+                              onClick={() => handleLaunchBlueprint(m.blueprintDraft!, 'PWA')}
                               className={`flex-1 py-2 rounded-full text-xs font-semibold cursor-pointer ${t.primaryBtn}`}
                             >
-                              Approve &amp; Launch Floor
+                              Launch PWA
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleLaunchBlueprint(m.blueprintDraft!, 'ANDROID_APK')}
+                              className={`flex-1 py-2 rounded-full text-xs font-semibold border cursor-pointer ${t.secondaryBtn}`}
+                            >
+                              Launch APK
                             </button>
                             <button
                               type="button"
@@ -1530,11 +1583,52 @@ export default function App() {
                       </svg>
                     </button>
                   </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider opacity-60">Target Output</span>
+                      <button
+                        type="button"
+                        onClick={() => mdFileInputRef.current?.click()}
+                        className="text-[11px] font-semibold text-accent hover:underline cursor-pointer"
+                      >
+                        Upload .md File
+                      </button>
+                      <input
+                        ref={mdFileInputRef}
+                        type="file"
+                        accept=".md,.txt,text/markdown"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0];
+                          if (!f) return;
+                          setBlueprintDraft(await f.text());
+                          showToast(`Loaded ${f.name}`);
+                          e.target.value = '';
+                        }}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setBlueprintTarget('PWA')}
+                        className={`py-2 rounded-2xl text-xs font-semibold border cursor-pointer ${blueprintTarget === 'PWA' ? t.primaryBtn : t.secondaryBtn}`}
+                      >
+                        Web PWA
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBlueprintTarget('ANDROID_APK')}
+                        className={`py-2 rounded-2xl text-xs font-semibold border cursor-pointer ${blueprintTarget === 'ANDROID_APK' ? t.primaryBtn : t.secondaryBtn}`}
+                      >
+                        Android APK (GitHub CI)
+                      </button>
+                    </div>
+                  </div>
                   <textarea
-                    rows={8}
+                    rows={7}
                     value={blueprintDraft}
                     onChange={(e) => setBlueprintDraft(e.target.value)}
-                    placeholder="# Project Blueprint: My PWA..."
+                    placeholder="# Project Blueprint: My App..."
                     className={`w-full rounded-2xl border p-3 text-xs font-mono focus:outline-none ${t.input}`}
                   />
                   <button
@@ -1562,6 +1656,20 @@ export default function App() {
                 }));
               }}
               onClose={() => setModelPickerKeyId(null)}
+              t={t}
+            />
+
+            {/* Cali Local Storage Directory Chooser */}
+            <DirectoryPickerModal
+              open={dirModalOpen}
+              initialConfig={storageCfg}
+              canDismiss={storageCfg.configured}
+              onSaved={(cfg, msg) => {
+                setStorageCfg(cfg);
+                setDirModalOpen(false);
+                showToast(msg);
+              }}
+              onClose={() => setDirModalOpen(false)}
               t={t}
             />
 

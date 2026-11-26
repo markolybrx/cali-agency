@@ -1,6 +1,6 @@
-export const APP_VERSION = '0.5.0';
+export const APP_VERSION = '0.6.0';
 export const APP_VERSION_TAG = `v${APP_VERSION}`;
-export const APP_VERSION_CODE = 500;
+export const APP_VERSION_CODE = 600;
 
 export interface ChangelogRelease {
   version: string;
@@ -11,14 +11,23 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    version: 'v0.6.0',
+    date: '2026-11-26',
+    title: 'Reachable Chat FAB, Local Directory Chooser & PWA/APK Target Modes',
+    highlights: [
+      'Moved Chat Cali from the top header down to a thumb-reachable Floating Action Button (FAB) above the bottom dock.',
+      'Added Local Storage Directory Chooser: Cali asks you to select your root folder (Documents / External / App Data) and base path for /Projects/, /Cache/, and /Backups/.',
+      'Added real Projects folder pathing + 1-tap Sync Project Folder to save individual project files locally into <root>/<base>/Projects/<project-slug>/.',
+      'Added Project Target selector: build either a Web PWA or an Android APK (automatically scaffolds Capacitor + GitHub Actions main.yml CI).',
+      'Added direct .md file upload inside the Blueprint Importer and custom Cali Monolith violet Android app icon.'
+    ]
+  },
+  {
     version: 'v0.5.0',
     date: '2026-11-26',
     title: 'Release Candidate Hardening: Snapshot Diff, Live Voice Tools & RC Diagnostics',
     highlights: [
-      'Snapshot Diff Viewer in Workspace: compare any saved Phase Snapshot against current files with Added/Removed/Modified file badges and Unified or Split line-by-line diffs.',
-      'Full Gemini Live Voice Tool-Calling: Cali can now execute get_agency_status, get_agent_report, control_loop (pause/resume), and resolve_approval while speaking, with live tool execution chips in the Voice Overlay.',
-      'RC Diagnostics & Stress-Test Suite inside Telemetry: 1-tap verification of Static Pre-Check Gate, Rolling Context Compactor, 5-Key Pool Isolation, and Local Backup round-trip.',
-      'Optional persistent debug.keystore support in GitHub Actions CI for seamless in-place APK upgrades.'
+      'Snapshot Diff Viewer (Unified/Split), Full Gemini Live 4-Tool Voice Control, and On-Device RC Diagnostics Suite.'
     ]
   },
   {
@@ -26,40 +35,15 @@ export const CHANGELOG: ChangelogRelease[] = [
     date: '2026-11-26',
     title: 'Claw3D-Style Interactive 3D Retro Virtual Office (Three.js)',
     highlights: [
-      'Procedural Three.js 3D Isometric Office with orbit/pinch-zoom/pan, camera presets (Iso 3D, Top, Cali Suite, Follow), articulated 3D walking/typing avatars, and 3D/2D/Grid switcher.'
+      'Procedural Three.js 3D Isometric Office with touch orbit/zoom/pan, camera presets, and articulated 3D avatars.'
     ]
   },
   {
     version: 'v0.4.0',
     date: '2026-11-26',
-    title: 'Conversational Onboarding Gate, Persistent Centered Dock, Local Save & Inspector',
+    title: 'Conversational Onboarding Gate, Persistent Centered Dock & Local Save',
     highlights: [
-      'Mandatory full-screen conversational Onboarding interview with accurate 0/4 progress.',
-      'Custom-coded searchable Model Picker, persistent enlarged centered-Home dock, Native Local Save, Full Backup/Restore, Chat-to-Blueprint Live Card, SVG PWA Icons, and Agent Latency Inspector.'
-    ]
-  },
-  {
-    version: 'v0.3.0',
-    date: '2026-11-26',
-    title: 'UX Overhaul, AQ. Key & Model Selector, + Autonomous Loop Engine',
-    highlights: [
-      'Native AQ.xxxx key auth, per-key model auto-detection, Prompt Studio read-only lock, Danger Zone modals, Static Pre-Check Gate, Phase Snapshots, and Rolling Context Compactor.'
-    ]
-  },
-  {
-    version: 'v0.2.0',
-    date: '2026-11-26',
-    title: 'Cali Monolith HQ & 16-Bit Pixel Office',
-    highlights: [
-      'Verbatim 13-agent + Cali prompts bundled offline and real Token/RPM/RPD/Context telemetry.'
-    ]
-  },
-  {
-    version: 'v0.1.0',
-    date: '2026-11-26',
-    title: 'Initial Android APK & 5-Key Agency Scaffold',
-    highlights: [
-      'Capacitor Android project with automated GitHub Actions debug APK build and 5-key pool.'
+      'Mandatory conversational onboarding, custom Model Picker, persistent centered-Home dock, and Agent Latency Inspector.'
     ]
   }
 ];

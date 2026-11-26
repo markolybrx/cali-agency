@@ -2,6 +2,14 @@ export type ThemeId = 'monolith' | 'nocturne' | 'alabaster';
 export type AccentId = 'marigold' | 'lavender' | 'champagne' | 'silverblue';
 export type LanguagePref = 'en' | 'taglish';
 export type ThinkingLevel = 'low' | 'medium' | 'high';
+export type ProjectTarget = 'PWA' | 'ANDROID_APK';
+export type StorageRootId = 'DOCUMENTS' | 'EXTERNAL' | 'DATA';
+
+export interface StorageDirectoryConfig {
+  root: StorageRootId;
+  baseFolder: string;
+  configured: boolean;
+}
 
 export type KeySlotId = 'KEY_CALI' | 'K1' | 'K2' | 'K3' | 'K4';
 export type KeyStatus = 'UNSET' | 'READY' | 'ACTIVE' | 'COOLDOWN' | 'BACKOFF' | 'INVALID';
@@ -114,6 +122,8 @@ export interface TechStack {
 export interface ProjectState {
   id: string;
   project_name: string;
+  target_platform: ProjectTarget;
+  local_path?: string;
   blueprint_md: string;
   current_phase_id: number;
   tech_stack: TechStack;

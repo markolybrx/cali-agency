@@ -1,5 +1,6 @@
 import type {
   ActivityEvent,
+  ProjectTarget,
   AgencyTask,
   KeySlotId,
   MemoryItem,
@@ -13,6 +14,7 @@ import { keyPool } from './keyPool';
 import { runStaticPreCheck } from './staticPreCheck';
 import { buildCompactProjectContext } from './contextCompactor';
 import { acquireScreenWakeLock, releaseScreenWakeLock, sendAgencyNotification } from './deviceRuntime';
+import { generateAndroidApkScaffold, getProjectLocalPath } from './localSave';
 
 export interface LoopHooks {
   onProjectUpdate: (project: ProjectState) => void;
@@ -56,7 +58,7 @@ export class AgencyOrchestratorLoop {
     this.hooks.onActivity({ agentId: 'cali', text: 'Agency floor paused.', kind: 'warn' });
   }
 
-  public async intakeBlueprint(blueprintMd: string, memories: MemoryItem[]): Promise<ProjectState> {
+  public async intakeBlueprint(blueprintMd: string, memories: MemoryItem[], targetPlatform: ProjectTarget = 'PWA'): Promise<ProjectState> {
     const slot = keyPool.acquireWorkerKey('master-orchestrator');
     const now = new Date().toISOString();
 
@@ -66,6 +68,8 @@ export class AgencyOrchestratorLoop {
       const fallback: ProjectState = {
         id: `proj_${Date.now().toString(36)}`,
         project_name: name,
+        target_platform: targetPlatform,
+        local_path: getProjectLocalPath(name),
         blueprint_md: blueprintMd,
         current_phase_id: 1,
         tech_stack: {
@@ -74,7 +78,7 @@ export class AgencyOrchestratorLoop {
           styling: 'Vanilla CSS',
           storage_or_backend: 'LocalStorage',
           testing_tool: 'Node Test Runner',
-          deployment_target: 'Vercel'
+          deployment_target: targetPlatform === 'ANDROID_APK' ? 'GitHub Actions APK (Capacitor)' : 'Vercel'
         },
         phases: [
           {
@@ -109,8 +113,8 @@ export class AgencyOrchestratorLoop {
             ]
           }
         ],
-        file_manifest: {},
-        files: {},
+        file_manifest: targetPlatform === 'ANDROID_APK' ? { 'capacitor.config.ts': 'Capacitor Android config', '.github/workflows/main.yml': 'GitHub Actions APK builder' } : {},
+        files: targetPlatform === 'ANDROID_APK' ? generateAndroidApkScaffold(name) : {},
         snapshots: [],
         created_at: now,
         updated_at: now
@@ -135,6 +139,7 @@ export class AgencyOrchestratorLoop {
       systemPrompt: orchPrompt.content,
       userPayload: JSON.stringify({
         mode: 'INTAKE',
+        target_platform: targetPlatform,
         blueprint_markdown: blueprintMd,
         user_preferences: memories.map((m) => `${m.key}: ${m.value}`)
       }),
@@ -144,7 +149,9 @@ export class AgencyOrchestratorLoop {
 
     const p: ProjectState = {
       id: `proj_${Date.now().toString(36)}`,
-      project_name: res.data.updated_project_state?.project_name || 'Agency PWA',
+      project_name: res.data.updated_project_state?.project_name || 'Agency Project',
+      target_platform: targetPlatform,
+      local_path: getProjectLocalPath(res.data.updated_project_state?.project_name || 'Agency Project'),
       blueprint_md: blueprintMd,
       current_phase_id: res.data.updated_project_state?.current_phase_id || 1,
       tech_stack: res.data.updated_project_state?.tech_stack || {
@@ -157,7 +164,7 @@ export class AgencyOrchestratorLoop {
       },
       phases: res.data.updated_project_state?.phases || [],
       file_manifest: res.data.updated_project_state?.file_manifest || {},
-      files: {},
+      files: targetPlatform === 'ANDROID_APK' ? generateAndroidApkScaffold(res.data.updated_project_state?.project_name || 'Agency Project') : {},
       snapshots: [],
       created_at: now,
       updated_at: now

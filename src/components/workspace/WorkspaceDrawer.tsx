@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import type { PhaseSnapshot, ProjectState } from '../../types/agency';
 import type { ThemeTokens } from '../../theme/themes';
 import { type GitHubConfig, shipProjectToGitHub } from '../../engine/storage';
-import { generatePwaIconsAndManifest, saveZipLocally } from '../../engine/localSave';
+import { generatePwaIconsAndManifest, getProjectLocalPath, saveZipLocally, syncProjectFolderLocally } from '../../engine/localSave';
 import type { ConfirmState } from '../common/ConfirmModal';
 import { SnapshotDiffModal } from './SnapshotDiffModal';
 
@@ -75,6 +75,12 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
     onToast(msg);
   };
 
+  const handleSyncFolder = async () => {
+    if (!project) return;
+    const msg = await syncProjectFolderLocally(project);
+    onToast(msg);
+  };
+
   const handleGenerateIcons = () => {
     if (!project) return;
     const assets = generatePwaIconsAndManifest(project.project_name);
@@ -101,7 +107,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
         <div>
           <h3 className="text-base font-semibold leading-none">Workspace &amp; Local Save</h3>
           <p className="text-[11px] opacity-60 mt-1">
-            {project ? `${project.project_name} • ${fileList.length} files` : 'No active project'}
+            {project ? `${project.project_name} (${project.target_platform || 'PWA'}) • ${fileList.length} files` : 'No active project'}
           </p>
         </div>
         {project && (
@@ -147,7 +153,15 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             onClick={handleSaveLocally}
             className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer disabled:opacity-40 ${t.secondaryBtn}`}
           >
-            Save Locally (.zip)
+            Save .zip
+          </button>
+          <button
+            type="button"
+            disabled={!project}
+            onClick={handleSyncFolder}
+            className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer disabled:opacity-40 ${t.secondaryBtn}`}
+          >
+            Sync Folder
           </button>
           <button
             type="button"
@@ -161,6 +175,12 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto pb-28 space-y-3">
+        {project && (
+          <div className={`rounded-2xl border px-3.5 py-2 flex items-center justify-between gap-2 text-[10px] font-mono ${t.surface}`}>
+            <span className="truncate opacity-75">Path: {project.local_path || getProjectLocalPath(project.project_name)}</span>
+            <span className="text-accent shrink-0">{project.target_platform || 'PWA'}</span>
+          </div>
+        )}
         {!project ? (
           <div className={`rounded-2xl border p-6 text-center text-xs opacity-65 ${t.surface}`}>
             No active project yet. Import a Markdown blueprint from Home or chat with Cali.
