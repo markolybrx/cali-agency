@@ -52,6 +52,17 @@ import { ChangelogDrawer } from './components/changelog/ChangelogDrawer';
 import { ConfirmModal, type ConfirmState } from './components/common/ConfirmModal';
 import { ModelPickerModal } from './components/common/ModelPickerModal';
 import { OnboardingGate } from './components/onboarding/OnboardingGate';
+import { CaliSignInModal } from './components/auth/CaliSignInModal';
+import {
+  type CaliBrainCache,
+  flushOfflineSyncQueue,
+  loadBrainCache,
+  pushPrivateMemoryToCloud,
+  pushProfileToCloud,
+  reviewSharedBrainCandidate,
+  submitSharedBrainCandidate,
+  syncBrainFromCloud
+} from './engine/caliBrain';
 import { DirectoryPickerModal } from './components/common/DirectoryPickerModal';
 
 type TabId = 'office' | 'workspace' | 'prompts' | 'home' | 'telemetry' | 'memory' | 'settings';
@@ -107,6 +118,8 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [brainCache, setBrainCache] = useState<CaliBrainCache>(() => loadBrainCache());
 
   const [loopStatus, setLoopStatus] = useState<'IDLE' | 'RUNNING' | 'PAUSED' | 'WATCHDOG' | 'DEMO'>('IDLE');
   const [hubTab, setHubTab] = useState<'feed' | 'agents' | 'checklist' | 'watchdog'>('feed');
@@ -170,6 +183,64 @@ export default function App() {
       setTelemetry(keyPool.getTelemetry());
     });
   }, []);
+
+  const handleSyncBrain = async () => {
+    const res = await syncBrainFromCloud(loadProfile(), loadMemories());
+    setBrainCache(res.cache);
+    if (res.synced) {
+      setProfile(res.mergedProfile);
+      saveProfile(res.mergedProfile);
+      setMemories(res.mergedMemories);
+      saveMemories(res.mergedMemories);
+    }
+  };
+
+  useEffect(() => {
+    void handleSyncBrain();
+    const onOnline = async () => {
+      const n = await flushOfflineSyncQueue();
+      await handleSyncBrain();
+      if (n > 0) showToast(`Back online — synced ${n} queued brain update(s)`);
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
+
+  const restoreFromBackupFile = async (file: File) => {
+    try {
+      const text = await file.text();
+      const backup = parseFullStateBackup(text);
+      setProfile(backup.profile);
+      saveProfile(backup.profile);
+      setMemories(backup.memories);
+      saveMemories(backup.memories);
+      setProjects(backup.projects);
+      saveProjects(backup.projects);
+      if (backup.projects[0]) {
+        setActiveProjectId(backup.projects[0].id);
+        saveActiveProjectId(backup.projects[0].id);
+      }
+      if (Array.isArray(backup.prompts)) {
+        for (const p of backup.prompts) savePromptOverride(p.id, p.content, p.thinkingLevel);
+        setPrompts(loadPrompts());
+      }
+      showToast(`Restored backup (${backup.projects.length} projects, ${backup.memories.length} memories)`);
+    } catch (err) {
+      showToast((err as Error).message);
+    }
+  };
+
+  const handleForceCompleteOnboarding = () => {
+    const completedProfile: UserProfile = {
+      ...profile,
+      onboarding_topics: { name_vibe: true, design_taste: true, tech_stack: true, autonomy: true },
+      onboarding_complete: true
+    };
+    setProfile(completedProfile);
+    saveProfile(completedProfile);
+    void pushProfileToCloud(completedProfile);
+    showToast('Onboarding complete — welcome to Monolith HQ!');
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -424,6 +495,8 @@ export default function App() {
         history: nextHistory.map((m) => ({ role: m.role, text: m.text })),
         profile,
         memories,
+        sharedMemories: brainCache.sharedMemories,
+        clearance: brainCache.clearance,
         activeProject,
         pendingDecisions: decisions
       });
@@ -459,9 +532,23 @@ export default function App() {
         }
       }
 
+      const answeredTurns = nextHistory.filter((m) => m.role === 'user').length;
+      if (!nextProfile.onboarding_complete && answeredTurns >= 4) {
+        nextProfile.onboarding_topics = { name_vibe: true, design_taste: true, tech_stack: true, autonomy: true };
+        nextProfile.onboarding_complete = true;
+      }
       setMemories(nextMems);
       setProfile(nextProfile);
       saveProfile(nextProfile);
+      void pushProfileToCloud(nextProfile);
+      for (const m of nextMems.slice(0, res.memory_ops.length)) {
+        void pushPrivateMemoryToCloud(m);
+      }
+      if (res.shared_candidates?.length) {
+        for (const sc of res.shared_candidates) {
+          void submitSharedBrainCandidate(sc.topic, sc.category, sc.value);
+        }
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -638,14 +725,27 @@ export default function App() {
       >
         {/* MANDATORY FIRST-TIME CONVERSATIONAL ONBOARDING GATE */}
         {!profile.onboarding_complete ? (
-          <OnboardingGate
-            profile={profile}
-            messages={messages}
-            busy={chatBusy}
-            onSend={handleSendChat}
-            onToast={showToast}
-            t={t}
-          />
+          <>
+            <OnboardingGate
+              profile={profile}
+              messages={messages}
+              busy={chatBusy}
+              onSend={handleSendChat}
+              onToast={showToast}
+              onOpenSignIn={() => setAuthModalOpen(true)}
+              onRestoreBackupFile={(f) => void restoreFromBackupFile(f)}
+              onFinishOnboarding={handleForceCompleteOnboarding}
+              t={t}
+            />
+            <CaliSignInModal
+              open={authModalOpen}
+              onClose={() => setAuthModalOpen(false)}
+              brain={brainCache}
+              onSyncNow={handleSyncBrain}
+              onToast={showToast}
+              t={t}
+            />
+          </>
         ) : (
           <>
             <div
@@ -993,9 +1093,61 @@ export default function App() {
               <div className={`absolute inset-0 z-20 flex flex-col backdrop-blur-2xl p-5 ${t.overlay}`}>
                 <div className="pb-4 border-b border-current/10 shrink-0">
                   <h3 className="text-lg font-semibold leading-none">What Cali Remembers</h3>
-                  <p className="text-[11px] opacity-60 mt-1">Injected into Orchestrator &amp; UI Designer</p>
+                  <p className="text-[11px] opacity-60 mt-1">Layer 2 Private Vault + Layer 1 Shared Brain ({brainCache.clearance})</p>
                 </div>
                 <div className="flex-1 overflow-y-auto py-4 pb-28 space-y-2.5">
+                  {brainCache.clearance === 'BOSS' && brainCache.pendingShared.length > 0 && (
+                    <div className={`rounded-2xl border p-3.5 space-y-2.5 ${t.accentCard}`}>
+                      <div className="text-[10px] font-mono uppercase tracking-widest text-accent">
+                        BOSS Queue • Pending Shared Brain ({brainCache.pendingShared.length})
+                      </div>
+                      {brainCache.pendingShared.map((item) => (
+                        <div key={item.id} className="rounded-xl bg-black/20 p-2.5 space-y-2">
+                          <div className="text-[11px] font-semibold">{item.topic} <span className="opacity-55 font-mono">({item.category})</span></div>
+                          <p className="text-xs opacity-85">{item.value}</p>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const r = await reviewSharedBrainCandidate(item.id, 'approved');
+                                showToast(r.detail);
+                                await handleSyncBrain();
+                              }}
+                              className={`flex-1 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer ${t.primaryBtn}`}
+                            >
+                              Approve to Shared
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const r = await reviewSharedBrainCandidate(item.id, 'rejected');
+                                showToast(r.detail);
+                                await handleSyncBrain();
+                              }}
+                              className={`px-3 py-1.5 rounded-full text-[11px] border cursor-pointer ${t.secondaryBtn}`}
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {brainCache.sharedMemories.length > 0 && (
+                    <div className={`rounded-2xl border p-3.5 space-y-2 ${t.surface}`}>
+                      <div className="text-[10px] font-mono uppercase tracking-widest opacity-60">
+                        Layer 1 • Shared Collective Brain ({brainCache.sharedMemories.length})
+                      </div>
+                      {brainCache.sharedMemories.map((sm) => (
+                        <div key={sm.id} className="text-xs border-t border-current/10 pt-2">
+                          <span className="font-semibold text-accent">{sm.topic}: </span>
+                          <span className="opacity-85">{sm.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {memories.length === 0 ? (
                     <p className="text-xs opacity-60 text-center py-8">No saved memories yet.</p>
                   ) : (
@@ -1041,6 +1193,33 @@ export default function App() {
                 </div>
 
                 <div className="flex-1 overflow-y-auto py-4 pb-32 space-y-4">
+                  {/* 0. Cali Cloud Sign-In & 3-Layer JARVIS Brain */}
+                  <div className={`rounded-3xl border p-4 space-y-2.5 ${t.accentCard}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-[10px] font-mono uppercase tracking-widest text-accent">3-Layer JARVIS Brain</div>
+                        <div className="text-sm font-semibold">
+                          {brainCache.signedIn ? brainCache.email : 'Offline Local Mode'}
+                        </div>
+                      </div>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold border ${t.subtleBadge}`}>
+                        {brainCache.signedIn ? brainCache.clearance : 'LOCAL'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] opacity-75">
+                      {brainCache.signedIn
+                        ? 'Synced with Supabase. Works 100% offline using your local cache.'
+                        : 'Sign in with Google or Email to sync Cali across all your devices and future apps.'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setAuthModalOpen(true)}
+                      className={`w-full py-2.5 rounded-full text-xs font-semibold cursor-pointer ${t.primaryBtn}`}
+                    >
+                      {brainCache.signedIn ? 'Manage Cloud Account & Sync' : 'Sign In / Connect Supabase'}
+                    </button>
+                  </div>
+
                   {/* 1. Theme & Accent */}
                   <div className={`rounded-3xl border p-4 space-y-3 ${t.surface}`}>
                     <div className="text-[11px] font-semibold uppercase tracking-widest opacity-55">1. Theme &amp; Text Accent</div>
@@ -1674,6 +1853,14 @@ export default function App() {
             />
 
             {/* Global Red Danger Zone Confirmation Modal */}
+            <CaliSignInModal
+              open={authModalOpen}
+              onClose={() => setAuthModalOpen(false)}
+              brain={brainCache}
+              onSyncNow={handleSyncBrain}
+              onToast={showToast}
+              t={t}
+            />
             <ConfirmModal state={confirmState} onCancel={() => setConfirmState(null)} t={t} />
           </>
         )}
