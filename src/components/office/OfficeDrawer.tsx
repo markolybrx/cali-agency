@@ -9,6 +9,7 @@ import {
   renderPixelOffice,
   stepOfficeSimulation
 } from './pixelOffice';
+import { Claw3DOffice } from './Claw3DOffice';
 
 interface MiniOfficeProps {
   agentsRef: React.MutableRefObject<PixelSpriteAgent[]>;
@@ -48,8 +49,8 @@ export const MiniOfficePreview: React.FC<MiniOfficeProps> = ({ agentsRef, packet
         height={OFFICE_HEIGHT}
         className="w-full h-60 sm:h-64 object-cover pixel-art block"
       />
-      <span className="absolute bottom-2.5 right-2.5 px-3 py-1 rounded-full bg-black/75 text-white text-[10px] font-semibold backdrop-blur">
-        Expand Full Office
+      <span className="absolute bottom-2.5 right-2.5 px-3 py-1 rounded-full bg-black/80 text-white text-[10px] font-semibold backdrop-blur border border-white/15">
+        Enter 3D Office ↗
       </span>
     </button>
   );
@@ -79,11 +80,11 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
   onOpenTelemetry
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [viewMode, setViewMode] = useState<'canvas' | 'grid'>('canvas');
+  const [viewMode, setViewMode] = useState<'3d' | '2d' | 'grid'>('3d');
   const [selectedAgent, setSelectedAgent] = useState<PixelSpriteAgent | null>(null);
 
   useEffect(() => {
-    if (!open || viewMode !== 'canvas') return;
+    if (!open || viewMode !== '2d') return;
     let raf = 0;
     let tick = 0;
     const loop = () => {
@@ -114,20 +115,29 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
 
   return (
     <div className={`absolute inset-0 z-20 flex flex-col backdrop-blur-2xl ${t.overlay}`}>
+      {/* Header + 3D / 2D / Grid Switcher */}
       <div className="px-4 py-3.5 border-b border-current/10 flex items-center justify-between gap-2 shrink-0">
         <div>
-          <h3 className="text-base font-semibold leading-none">Cali AI Office</h3>
-          <p className="text-[11px] opacity-60 mt-1">13 Pixel Agents + Cali Executive Suite</p>
+          <h3 className="text-base font-semibold leading-none">Cali 3D AI Office</h3>
+          <p className="text-[11px] opacity-60 mt-1">13 Agents + Cali Suite • Interactive Three.js</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setViewMode(viewMode === 'canvas' ? 'grid' : 'canvas')}
-          className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer ${t.secondaryBtn}`}
-        >
-          {viewMode === 'canvas' ? 'Mobile Grid' : 'Floorplan'}
-        </button>
+        <div className={`inline-flex p-1 rounded-full ${t.tabWrap}`}>
+          {(['3d', '2d', 'grid'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setViewMode(mode)}
+              className={`px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase cursor-pointer ${
+                viewMode === mode ? t.tabActive : t.tabIdle
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
       </div>
 
+      {/* 5-Key API Limit & Telemetry Bar */}
       <div className="px-4 py-2.5 border-b border-current/10 space-y-2 shrink-0">
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
           {keys.map((k) => {
@@ -164,8 +174,16 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
         </div>
       </div>
 
+      {/* Main Office Viewport */}
       <div className="flex-1 overflow-y-auto p-4 pb-28 space-y-3">
-        {viewMode === 'canvas' ? (
+        {viewMode === '3d' ? (
+          <Claw3DOffice
+            agentsRef={agentsRef}
+            packetsRef={packetsRef}
+            selectedAgentId={selectedAgent?.id || null}
+            onSelectAgent={setSelectedAgent}
+          />
+        ) : viewMode === '2d' ? (
           <div className="rounded-2xl overflow-hidden border border-current/15 shadow-xl bg-[#3D2716]">
             <canvas
               ref={canvasRef}
@@ -212,7 +230,7 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
           onClick={onTriggerDemoHandoff}
           className={`w-full py-2.5 rounded-full text-xs font-medium border cursor-pointer ${t.secondaryBtn}`}
         >
-          Test Packet Handoff Animation
+          Test 3D Packet Handoff
         </button>
 
         {/* Agent Latency & Token Inspector */}

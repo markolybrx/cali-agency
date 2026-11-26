@@ -1,6 +1,6 @@
-export const APP_VERSION = '0.4.0';
+export const APP_VERSION = '0.4.1';
 export const APP_VERSION_TAG = `v${APP_VERSION}`;
-export const APP_VERSION_CODE = 400;
+export const APP_VERSION_CODE = 401;
 
 export interface ChangelogRelease {
   version: string;
@@ -11,18 +11,26 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    version: 'v0.4.1',
+    date: '2026-11-26',
+    title: 'Claw3D-Style Interactive 3D Retro Virtual Office (Three.js)',
+    highlights: [
+      'Full interactive 3D Isometric Virtual Office built with procedural Three.js geometry (inspired by MIT-licensed Claw3D).',
+      'Touch Orbit, Pinch-to-Zoom, and Pan controls plus quick camera presets (Isometric, Top-Down, Cali Suite, Follow Agent).',
+      'Detailed 3D rooms: Cali Glass Executive Suite, 3×3 Wooden Workstations with glowing monitors, Conference Table, blinking Server/QA Racks, Kitchenette, and red-sofa Break Lounge.',
+      '14 articulated 3D avatars with swinging walking limbs, typing arms, floating projected nameplates, live speech bubbles, and glowing 3D handoff packets.',
+      'Instant 3D / 2D / Grid switcher in the Office header with zero GPU drain when on other tabs.'
+    ]
+  },
+  {
     version: 'v0.4.0',
     date: '2026-11-26',
     title: 'Conversational Onboarding Gate, Persistent Centered Dock, Local Save & Inspector',
     highlights: [
-      'Mandatory full-screen conversational Onboarding interview before accessing the dashboard, with accurate 0/4 progress that only fills as topics are answered.',
-      'Replaced all native OS <select> popups with a 100% custom-coded searchable Monolith Model Picker modal.',
-      'Enlarged floating bottom menu bar kept persistently visible on every screen, with Home centered as default and close (✕) buttons removed from primary menu views.',
-      'Native Local Save via @capacitor/filesystem (Documents/CaliAgency/) with seamless browser fallback for .zip workspaces and backups.',
-      'Full Local State Backup & Restore (.cali-backup.json) protecting projects, memories, and prompts across APK updates.',
-      'Chat-to-Blueprint Live Card: inspect, edit, and launch Cali-drafted blueprints directly from Chat.',
-      'Built-in SVG App Icon & manifest.webmanifest generator inside Workspace.',
-      'Per-Agent Latency & Token Inspector when tapping any sprite in the 16-bit Pixel Office.'
+      'Mandatory full-screen conversational Onboarding interview before accessing the dashboard, with accurate 0/4 progress.',
+      'Replaced native OS <select> popups with a custom-coded searchable Monolith Model Picker modal.',
+      'Enlarged floating bottom menu bar persistently visible with Home centered and close buttons removed from primary views.',
+      'Native Local Save (@capacitor/filesystem), Full Backup/Restore, Chat-to-Blueprint Live Card, SVG PWA Icons, and Agent Latency/Token Inspector.'
     ]
   },
   {
@@ -30,9 +38,7 @@ export const CHANGELOG: ChangelogRelease[] = [
     date: '2026-11-26',
     title: 'UX Overhaul, AQ. Key & Model Selector, + Autonomous Loop Engine',
     highlights: [
-      'Floating bottom thumb menu bar + clickable version Changelog drawer.',
-      'Native AQ.xxxx Gemini API key authentication + auto-detected available model dropdown per key.',
-      'Explicit Save Settings button, Prompt Studio read-only list view, and red Danger Zone confirmation modals.',
+      'Native AQ.xxxx Gemini API key auth + per-key model auto-detection, Prompt Studio read-only lock, and red Danger Zone modals.',
       'Zero-API Static Pre-Check Gate, Phase Snapshots & Rollback, Rolling Context Compactor, and Wake-Lock/Local Notifications.'
     ]
   },
@@ -41,8 +47,7 @@ export const CHANGELOG: ChangelogRelease[] = [
     date: '2026-11-26',
     title: 'Cali Monolith HQ & 16-Bit Pixel Office',
     highlights: [
-      '16-bit pixel-art Virtual Office with walking, typing, and blinking chibi agents + packet handoffs.',
-      '100% verbatim 13-agent + Cali prompts bundled offline and real Token/RPM/RPD/Context telemetry.'
+      'Verbatim 13-agent + Cali prompts bundled offline and real Token/RPM/RPD/Context telemetry.'
     ]
   },
   {
