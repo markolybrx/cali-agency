@@ -25,13 +25,19 @@ jobs:
           java-version: '17'
 
       - name: Read Version Metadata from package.json
-        id: meta
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          VERSION_CODE=$(node -e "const [x,y,z]=require('./package.json').version.split('.').map(Number); console.log(x*10000 + y*100 + z);")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
-          echo "Building Cali PWA Agency v$VERSION (versionCode $VERSION_CODE)"
+          node << 'NODE_EOF'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const version = pkg.version || '0.4.0';
+          const [maj = 0, min = 0, pat = 0] = version.split('.').map(Number);
+          const code = maj * 10000 + min * 100 + pat;
+          fs.appendFileSync(
+            process.env.GITHUB_ENV,
+            'APP_VERSION=' + version + '\nAPP_VERSION_CODE=' + code + '\n'
+          );
+          console.log('Detected version ' + version + ' (versionCode ' + code + ')');
+          NODE_EOF
 
       - name: Accept Preinstalled Android SDK Licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
@@ -49,36 +55,38 @@ jobs:
           fi
 
       - name: Sync Version Metadata & Android Permissions
-        env:
-          APP_VERSION: ${{ steps.meta.outputs.version }}
-          APP_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
         run: |
-          node -e '
-            const fs = require("fs");
-            const gradlePath = "android/app/build.gradle";
-            let gradle = fs.readFileSync(gradlePath, "utf8");
-            gradle = gradle.replace(/versionCode\s+\d+/, "versionCode " + process.env.APP_VERSION_CODE);
-            gradle = gradle.replace(/versionName\s+"[^"]+"/, "versionName " + JSON.stringify(process.env.APP_VERSION));
-            fs.writeFileSync(gradlePath, gradle, "utf8");
+          node << 'NODE_EOF'
+          const fs = require('fs');
 
-            const manifestPath = "android/app/src/main/AndroidManifest.xml";
-            let xml = fs.readFileSync(manifestPath, "utf8");
-            const perms = [
-              "android.permission.INTERNET",
-              "android.permission.ACCESS_NETWORK_STATE",
-              "android.permission.RECORD_AUDIO",
-              "android.permission.MODIFY_AUDIO_SETTINGS",
-              "android.permission.WAKE_LOCK",
-              "android.permission.FOREGROUND_SERVICE",
-              "android.permission.POST_NOTIFICATIONS"
-            ];
-            for (const perm of perms) {
-              if (!xml.includes(perm)) {
-                xml = xml.replace("<application", "    <uses-permission android:name=\"" + perm + "\" />\n    <application");
-              }
+          const gradlePath = 'android/app/build.gradle';
+          let gradle = fs.readFileSync(gradlePath, 'utf8');
+          gradle = gradle.replace(/versionCode\s+\d+/, 'versionCode ' + process.env.APP_VERSION_CODE);
+          gradle = gradle.replace(/versionName\s+"[^"]+"/, 'versionName ' + JSON.stringify(process.env.APP_VERSION));
+          fs.writeFileSync(gradlePath, gradle, 'utf8');
+
+          const manifestPath = 'android/app/src/main/AndroidManifest.xml';
+          let xml = fs.readFileSync(manifestPath, 'utf8');
+          const perms = [
+            'android.permission.INTERNET',
+            'android.permission.ACCESS_NETWORK_STATE',
+            'android.permission.RECORD_AUDIO',
+            'android.permission.MODIFY_AUDIO_SETTINGS',
+            'android.permission.WAKE_LOCK',
+            'android.permission.FOREGROUND_SERVICE',
+            'android.permission.POST_NOTIFICATIONS'
+          ];
+          for (const perm of perms) {
+            if (!xml.includes(perm)) {
+              xml = xml.replace(
+                '<application',
+                '    <uses-permission android:name="' + perm + '" />\n    <application'
+              );
             }
-            fs.writeFileSync(manifestPath, xml, "utf8");
-          '
+          }
+          fs.writeFileSync(manifestPath, xml, 'utf8');
+          console.log('Synced build.gradle & AndroidManifest.xml for v' + process.env.APP_VERSION);
+          NODE_EOF
 
       - name: Sync Capacitor Assets
         run: npx cap sync android
@@ -92,6 +100,6 @@ jobs:
       - name: Upload Sideloadable APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cali-pwa-agency-v${{ steps.meta.outputs.version }}-debug-apk
+          name: cali-pwa-agency-v${{ env.APP_VERSION }}-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30

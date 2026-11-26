@@ -19,6 +19,7 @@ export interface LoopHooks {
   onActivity: (event: Omit<ActivityEvent, 'id' | 'ts'>) => void;
   onHandoff: (from: WorkerAgentId | 'cali', to: WorkerAgentId | 'cali', label: string) => void;
   onAgentVisual: (agentId: WorkerAgentId | 'cali', state: 'IDLE' | 'THINKING' | 'CODING' | 'REVIEWING' | 'BLOCKED' | 'TALKING', speech?: string) => void;
+  onAgentMetric: (agentId: WorkerAgentId | 'cali', latencyMs: number, tokens: number, taskLabel: string, isRetry?: boolean) => void;
   onPendingDecision: (decision: Omit<PendingDecision, 'id' | 'createdAt'>) => void;
   onLoopStatus: (status: 'IDLE' | 'RUNNING' | 'PAUSED' | 'WATCHDOG' | 'DEMO') => void;
 }
@@ -85,62 +86,26 @@ export class AgencyOrchestratorLoop {
               { id: 'P1-C2', description: 'Valid manifest.webmanifest & sw.js precache shell', verified: false }
             ],
             tasks: [
-              {
-                task_id: 'P1-T1',
-                title: 'Define design tokens & responsive layout CSS',
-                assigned_agent: 'ui-designer',
-                target_files: ['styles.css'],
-                status: 'PENDING',
-                retry_count: 0,
-                split_depth: 0
-              },
-              {
-                task_id: 'P1-T2',
-                title: 'Build PWA app shell, manifest.webmanifest & sw.js',
-                assigned_agent: 'frontend-developer',
-                target_files: ['index.html', 'manifest.webmanifest', 'sw.js'],
-                status: 'PENDING',
-                retry_count: 0,
-                split_depth: 0
-              }
+              { task_id: 'P1-T1', title: 'Define design tokens & responsive layout CSS', assigned_agent: 'ui-designer', target_files: ['styles.css'], status: 'PENDING', retry_count: 0, split_depth: 0 },
+              { task_id: 'P1-T2', title: 'Build PWA app shell, manifest.webmanifest & sw.js', assigned_agent: 'frontend-developer', target_files: ['index.html', 'manifest.webmanifest', 'sw.js'], status: 'PENDING', retry_count: 0, split_depth: 0 }
             ]
           },
           {
             phase_id: 2,
             name: 'Phase 2: Data Layer & Core MVP',
             status: 'PENDING',
-            checklist: [
-              { id: 'P2-C1', description: 'LocalStorage CRUD repository wired cleanly', verified: false }
-            ],
+            checklist: [{ id: 'P2-C1', description: 'LocalStorage CRUD repository wired cleanly', verified: false }],
             tasks: [
-              {
-                task_id: 'P2-T1',
-                title: 'Implement LocalStorage CRUD store & app logic',
-                assigned_agent: 'backend-developer',
-                target_files: ['app.js'],
-                status: 'PENDING',
-                retry_count: 0,
-                split_depth: 0
-              }
+              { task_id: 'P2-T1', title: 'Implement LocalStorage CRUD store & app logic', assigned_agent: 'backend-developer', target_files: ['app.js'], status: 'PENDING', retry_count: 0, split_depth: 0 }
             ]
           },
           {
             phase_id: 3,
             name: 'Phase 3: QA, A11y & Release',
             status: 'PENDING',
-            checklist: [
-              { id: 'P3-C1', description: 'WCAG 2.1 AA semantics & hosting config ready', verified: false }
-            ],
+            checklist: [{ id: 'P3-C1', description: 'WCAG 2.1 AA semantics & hosting config ready', verified: false }],
             tasks: [
-              {
-                task_id: 'P3-T1',
-                title: 'Generate vercel.json & DEPLOY.md release docs',
-                assigned_agent: 'deployment-engineer',
-                target_files: ['vercel.json', 'DEPLOY.md'],
-                status: 'PENDING',
-                retry_count: 0,
-                split_depth: 0
-              }
+              { task_id: 'P3-T1', title: 'Generate vercel.json & DEPLOY.md release docs', assigned_agent: 'deployment-engineer', target_files: ['vercel.json', 'DEPLOY.md'], status: 'PENDING', retry_count: 0, split_depth: 0 }
             ]
           }
         ],
@@ -153,7 +118,7 @@ export class AgencyOrchestratorLoop {
       this.hooks.onProjectUpdate(fallback);
       this.hooks.onActivity({
         agentId: 'master-orchestrator',
-        text: `Loaded "${name}" locally (configure K1-K4 keys & tap Save Settings for live Gemini intake).`,
+        text: `Loaded "${name}" locally (add K1-K4 keys & tap Save Settings for live Gemini intake).`,
         kind: 'info'
       });
       return fallback;
@@ -161,6 +126,7 @@ export class AgencyOrchestratorLoop {
 
     this.hooks.onAgentVisual('master-orchestrator', 'THINKING', 'Parsing blueprint & locking tech stack...');
     const orchPrompt = getPromptByRole('master-orchestrator');
+    const t0 = performance.now();
     const res = await callGeminiJson<{
       reasoning?: string;
       updated_project_state: Omit<ProjectState, 'id' | 'blueprint_md' | 'files' | 'snapshots' | 'created_at' | 'updated_at'>;
@@ -174,6 +140,7 @@ export class AgencyOrchestratorLoop {
       }),
       thinkingLevel: orchPrompt.thinkingLevel
     });
+    this.hooks.onAgentMetric('master-orchestrator', Math.round(performance.now() - t0), res.usage.totalTokens, 'Blueprint INTAKE');
 
     const p: ProjectState = {
       id: `proj_${Date.now().toString(36)}`,
@@ -222,10 +189,10 @@ export class AgencyOrchestratorLoop {
       if (!phase) {
         this.hooks.onActivity({
           agentId: 'cali',
-          text: `Project "${project.project_name}" complete! Ready to preview, export, or ship.`,
+          text: `Project "${project.project_name}" complete! Ready to preview, save locally, or ship.`,
           kind: 'success'
         });
-        void sendAgencyNotification('Cali Agency Complete', `${project.project_name} finished all phases and is ready to ship.`);
+        void sendAgencyNotification('Cali Agency Complete', `${project.project_name} finished all phases.`);
         void releaseScreenWakeLock();
         this.running = false;
         this.hooks.onLoopStatus('IDLE');
@@ -257,9 +224,9 @@ export class AgencyOrchestratorLoop {
         });
 
         const { systemPrompt, thinkingLevel } = assembleWorkerSystemPrompt(nextTask.assigned_agent);
-        // Rolling Context Compactor: full target files + lightweight symbol index of rest of repo
         const compactCtx = buildCompactProjectContext(project, nextTask.target_files);
 
+        const t0 = performance.now();
         const workerRes = await callGeminiJson<WorkerResponse>({
           keyId: key.id,
           systemPrompt,
@@ -272,6 +239,7 @@ export class AgencyOrchestratorLoop {
             recent_handoffs: compactCtx.recent_handoffs
           })
         });
+        this.hooks.onAgentMetric(nextTask.assigned_agent, Math.round(performance.now() - t0), workerRes.usage.totalTokens, nextTask.title);
 
         const out = workerRes.data;
         if (out.status === 'BLOCKED' && out.blockers?.some((b) => b.includes('TASK_TOO_LARGE'))) {
@@ -292,12 +260,11 @@ export class AgencyOrchestratorLoop {
         this.hooks.onAgentVisual(nextTask.assigned_agent, 'IDLE');
         this.hooks.onProjectUpdate({ ...project, updated_at: new Date().toISOString() });
 
-        // ZERO-API STATIC PRE-CHECK GATE (saves high-thinking Reviewer quota on syntax/JSON errors)
         const preCheck = runStaticPreCheck(out.files || []);
         if (!preCheck.passed) {
           this.hooks.onActivity({
             agentId: 'precheck',
-            text: `Static Pre-Check caught ${preCheck.issues.length} issue(s) -> routing straight to 09. Debugger.`,
+            text: `Static Pre-Check caught ${preCheck.issues.length} issue(s) -> routing to 09. Debugger.`,
             kind: 'warn'
           });
           this.hooks.onHandoff(nextTask.assigned_agent, 'debugger', 'Static Pre-Check fail');
@@ -307,7 +274,6 @@ export class AgencyOrchestratorLoop {
           continue;
         }
 
-        // Route to 07-code-reviewer
         this.hooks.onHandoff(nextTask.assigned_agent, 'code-reviewer', `${nextTask.task_id} diff`);
         const revKey = keyPool.acquireWorkerKey('code-reviewer');
         if (!revKey) {
@@ -317,6 +283,7 @@ export class AgencyOrchestratorLoop {
 
         this.hooks.onAgentVisual('code-reviewer', 'REVIEWING', `Auditing ${nextTask.task_id}...`);
         const revCfg = assembleWorkerSystemPrompt('code-reviewer');
+        const rt0 = performance.now();
         const revRes = await callGeminiJson<WorkerResponse>({
           keyId: revKey.id,
           systemPrompt: revCfg.systemPrompt,
@@ -328,6 +295,7 @@ export class AgencyOrchestratorLoop {
             handoff_notes: out.handoff_notes || []
           })
         });
+        this.hooks.onAgentMetric('code-reviewer', Math.round(performance.now() - rt0), revRes.usage.totalTokens, `Audit ${nextTask.task_id}`);
         this.hooks.onAgentVisual('code-reviewer', 'IDLE');
 
         if (revRes.data.status === 'NEEDS_REVISION' && (revRes.data.blockers?.length || 0) > 0) {
@@ -335,11 +303,10 @@ export class AgencyOrchestratorLoop {
           nextTask.blockers = revRes.data.blockers;
           if (nextTask.retry_count >= 3) {
             this.hooks.onAgentVisual('code-reviewer', 'BLOCKED', 'Circuit breaker hit');
-            const detail = `Reviewer flagged blockers 3 times: ${revRes.data.blockers?.join(' | ')}`;
             this.hooks.onPendingDecision({
               kind: 'CIRCUIT_BREAKER',
               title: `Circuit Breaker on ${nextTask.task_id}`,
-              detail,
+              detail: `Reviewer flagged blockers 3 times: ${revRes.data.blockers?.join(' | ')}`,
               approveLabel: 'Skip & Mark Done',
               declineLabel: 'Keep Paused',
               payload: { taskId: nextTask.task_id }
@@ -393,17 +360,14 @@ export class AgencyOrchestratorLoop {
     for (const p of task.target_files) {
       if (project.files[p]) targetContents[p] = project.files[p];
     }
+    const t0 = performance.now();
     const res = await callGeminiJson<WorkerResponse>({
       keyId: dbgKey.id,
       systemPrompt: dbgCfg.systemPrompt,
       thinkingLevel: dbgCfg.thinkingLevel,
-      userPayload: JSON.stringify({
-        tech_stack: project.tech_stack,
-        task,
-        blockers,
-        files: targetContents
-      })
+      userPayload: JSON.stringify({ tech_stack: project.tech_stack, task, blockers, files: targetContents })
     });
+    this.hooks.onAgentMetric('debugger', Math.round(performance.now() - t0), res.usage.totalTokens, `Patch ${task.task_id}`, true);
     for (const f of res.data.files || []) {
       if (f.action !== 'DELETE' && typeof f.content === 'string') {
         project.files[f.path] = f.content;
@@ -427,6 +391,7 @@ export class AgencyOrchestratorLoop {
     }
     this.hooks.onAgentVisual('qa-tester', 'THINKING', `Writing Phase ${phase.phase_id} QA tests...`);
     const qaCfg = assembleWorkerSystemPrompt('qa-tester');
+    const t0 = performance.now();
     const qaRes = await callGeminiJson<WorkerResponse>({
       keyId: qaKey.id,
       systemPrompt: qaCfg.systemPrompt,
@@ -438,19 +403,13 @@ export class AgencyOrchestratorLoop {
         file_manifest: project.file_manifest
       })
     });
+    this.hooks.onAgentMetric('qa-tester', Math.round(performance.now() - t0), qaRes.usage.totalTokens, `Phase ${phase.phase_id} QA`);
     for (const f of qaRes.data.files || []) {
       if (typeof f.content === 'string') project.files[f.path] = f.content;
     }
     this.hooks.onAgentVisual('qa-tester', 'IDLE');
     this.hooks.onHandoff('qa-tester', 'master-orchestrator', `Phase ${phase.phase_id} QA report`);
-    this.hooks.onActivity({
-      agentId: 'qa-tester',
-      text: `Generated Phase ${phase.phase_id} test suite: ${qaRes.data.summary || 'Ready for gate.'}`,
-      kind: 'success',
-      keyId: qaKey.id
-    });
 
-    // Save Phase Snapshot for 1-Tap Rollback
     project.snapshots.unshift({
       id: `snap_p${phase.phase_id}_${Date.now().toString(36)}`,
       phase_id: phase.phase_id,
@@ -497,46 +456,21 @@ export class AgencyOrchestratorLoop {
       this.pause();
       return;
     }
-    const splitA: AgencyTask = {
-      ...task,
-      task_id: `${task.task_id}A`,
-      title: `${task.title} (Part 1)`,
-      split_depth: task.split_depth + 1,
-      status: 'PENDING'
-    };
-    const splitB: AgencyTask = {
-      ...task,
-      task_id: `${task.task_id}B`,
-      title: `${task.title} (Part 2)`,
-      split_depth: task.split_depth + 1,
-      status: 'PENDING'
-    };
+    const splitA: AgencyTask = { ...task, task_id: `${task.task_id}A`, title: `${task.title} (Part 1)`, split_depth: task.split_depth + 1, status: 'PENDING' };
+    const splitB: AgencyTask = { ...task, task_id: `${task.task_id}B`, title: `${task.title} (Part 2)`, split_depth: task.split_depth + 1, status: 'PENDING' };
     const idx = phase.tasks.findIndex((t) => t.task_id === task.task_id);
     phase.tasks.splice(idx, 1, splitA, splitB);
-    this.hooks.onActivity({
-      agentId: 'master-orchestrator',
-      text: `Autonomous SPLIT_TASK: ${task.task_id} -> ${splitA.task_id} & ${splitB.task_id}`,
-      kind: 'handoff'
-    });
+    this.hooks.onActivity({ agentId: 'master-orchestrator', text: `Autonomous SPLIT_TASK: ${task.task_id} -> ${splitA.task_id} & ${splitB.task_id}`, kind: 'handoff' });
     this.hooks.onProjectUpdate({ ...project });
   }
 
   private enterWatchdog(project: ProjectState): void {
     this.running = false;
     this.hooks.onLoopStatus('WATCHDOG');
-    this.hooks.onActivity({
-      agentId: 'watchdog',
-      text: 'All worker keys cooling down or offline. Watchdog polling every 10s...',
-      kind: 'warn'
-    });
+    this.hooks.onActivity({ agentId: 'watchdog', text: 'All worker keys cooling down or offline. Watchdog polling every 10s...', kind: 'warn' });
     keyPool.startWatchdog((recoveredKey: KeySlotId) => {
-      this.hooks.onActivity({
-        agentId: 'cali',
-        text: `Watchdog pinged me: ${recoveredKey} is green again! Auto-resuming production.`,
-        kind: 'success',
-        keyId: recoveredKey
-      });
-      void sendAgencyNotification('Cali Watchdog Recovered', `${recoveredKey} is back online. Production resumed.`);
+      this.hooks.onActivity({ agentId: 'cali', text: `Watchdog pinged me: ${recoveredKey} is green again! Auto-resuming production.`, kind: 'success', keyId: recoveredKey });
+      void sendAgencyNotification('Cali Watchdog Recovered', `${recoveredKey} is back online.`);
       this.runLoop(project);
     });
   }

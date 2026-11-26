@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import type { PromptEntry, ThinkingLevel } from '../../types/agency';
 import type { ThemeTokens } from '../../theme/themes';
 import { resetAllPrompts, savePromptOverride } from '../../prompts/agencyPrompts';
+import { saveTextLocally } from '../../engine/localSave';
 import type { ConfirmState } from '../common/ConfirmModal';
 
 interface PromptStudioProps {
   open: boolean;
-  onClose: () => void;
   t: ThemeTokens;
   prompts: PromptEntry[];
   onPromptsChange: (next: PromptEntry[]) => void;
@@ -16,7 +16,6 @@ interface PromptStudioProps {
 
 export const PromptStudioDrawer: React.FC<PromptStudioProps> = ({
   open,
-  onClose,
   t,
   prompts,
   onPromptsChange,
@@ -40,8 +39,7 @@ export const PromptStudioDrawer: React.FC<PromptStudioProps> = ({
   };
 
   return (
-    <div className={`absolute inset-0 z-30 flex flex-col backdrop-blur-2xl p-4 ${t.overlay}`}>
-      {/* Header */}
+    <div className={`absolute inset-0 z-20 flex flex-col backdrop-blur-2xl p-4 ${t.overlay}`}>
       <div className="flex items-center justify-between pb-3 border-b border-current/10 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           {active && (
@@ -68,17 +66,22 @@ export const PromptStudioDrawer: React.FC<PromptStudioProps> = ({
             </p>
           </div>
         </div>
-        <button type="button" onClick={onClose} className="p-2 rounded-full border border-current/15 cursor-pointer shrink-0">
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+        {!active && (
+          <button
+            type="button"
+            onClick={async () => {
+              const msg = await saveTextLocally('cali-prompt-pack.json', JSON.stringify(prompts, null, 2));
+              onToast(msg);
+            }}
+            className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer shrink-0 ${t.secondaryBtn}`}
+          >
+            Export Pack
+          </button>
+        )}
       </div>
 
-      {/* LIST VIEW (Only shows prompt content after clicking a card!) */}
       {!active ? (
-        <div className="flex-1 overflow-y-auto py-3 pb-24 space-y-2.5">
+        <div className="flex-1 overflow-y-auto py-3 pb-28 space-y-2.5">
           {prompts.map((p) => (
             <button
               key={p.id}
@@ -103,7 +106,6 @@ export const PromptStudioDrawer: React.FC<PromptStudioProps> = ({
             </button>
           ))}
 
-          {/* Danger Zone: Reset All Prompts */}
           <div className="rounded-2xl border border-rose-500/35 bg-rose-950/20 p-3.5 flex items-center justify-between gap-3 mt-4">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-400">Danger Zone</div>
@@ -114,7 +116,7 @@ export const PromptStudioDrawer: React.FC<PromptStudioProps> = ({
               onClick={() =>
                 onRequestConfirm({
                   title: 'Reset All Prompts?',
-                  message: 'This will erase any custom prompt edits and restore all 15 verbatim default prompts.',
+                  message: 'This will erase any custom prompt edits and restore all verbatim default prompts.',
                   confirmLabel: 'Reset Prompts',
                   onConfirm: () => {
                     const reset = resetAllPrompts();
@@ -130,8 +132,7 @@ export const PromptStudioDrawer: React.FC<PromptStudioProps> = ({
           </div>
         </div>
       ) : (
-        /* DETAIL VIEW: Read-Only by default with explicit Edit button */
-        <div className="flex-1 flex flex-col min-h-0 py-3 pb-20 space-y-3">
+        <div className="flex-1 flex flex-col min-h-0 py-3 pb-28 space-y-3">
           <div className="flex items-center justify-between gap-2 shrink-0">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] uppercase opacity-55 font-semibold">Thinking:</span>

@@ -1,11 +1,11 @@
-import JSZip from 'jszip';
-import type { MemoryItem, ProjectState, UserProfile } from '../types/agency';
+import type { AgentMetric, MemoryItem, ProjectState, UserProfile } from '../types/agency';
 
-const PROJECTS_KEY = 'cali_agency_projects_v030';
-const ACTIVE_PROJECT_KEY = 'cali_agency_active_project_v030';
-const MEMORIES_KEY = 'cali_agency_memories_v030';
-const PROFILE_KEY = 'cali_agency_profile_v030';
-const GITHUB_CFG_KEY = 'cali_agency_github_v030';
+const PROJECTS_KEY = 'cali_agency_projects_v040';
+const ACTIVE_PROJECT_KEY = 'cali_agency_active_project_v040';
+const MEMORIES_KEY = 'cali_agency_memories_v040';
+const PROFILE_KEY = 'cali_agency_profile_v040';
+const GITHUB_CFG_KEY = 'cali_agency_github_v040';
+const METRICS_KEY = 'cali_agency_metrics_v040';
 
 export interface GitHubConfig {
   token: string;
@@ -14,9 +14,29 @@ export interface GitHubConfig {
   branch: string;
 }
 
+export function createFreshProfile(): UserProfile {
+  return {
+    preferred_name: null,
+    honorific: null,
+    language_pref: 'en',
+    onboarding_topics: {
+      name_vibe: false,
+      design_taste: false,
+      tech_stack: false,
+      autonomy: false
+    },
+    onboarding_complete: false
+  };
+}
+
+export function countCompletedTopics(profile: UserProfile): number {
+  const t = profile.onboarding_topics;
+  return [t.name_vibe, t.design_taste, t.tech_stack, t.autonomy].filter(Boolean).length;
+}
+
 export function loadProjects(): ProjectState[] {
   try {
-    const raw = localStorage.getItem(PROJECTS_KEY) || localStorage.getItem('cali_agency_projects_v020');
+    const raw = localStorage.getItem(PROJECTS_KEY) || localStorage.getItem('cali_agency_projects_v030');
     if (!raw) return [];
     const parsed = JSON.parse(raw) as ProjectState[];
     return parsed.map((p) => ({ ...p, snapshots: Array.isArray(p.snapshots) ? p.snapshots : [] }));
@@ -34,7 +54,7 @@ export function saveProjects(projects: ProjectState[]): void {
 }
 
 export function loadActiveProjectId(): string | null {
-  return localStorage.getItem(ACTIVE_PROJECT_KEY) || localStorage.getItem('cali_agency_active_project_v020');
+  return localStorage.getItem(ACTIVE_PROJECT_KEY) || localStorage.getItem('cali_agency_active_project_v030');
 }
 
 export function saveActiveProjectId(id: string | null): void {
@@ -44,7 +64,7 @@ export function saveActiveProjectId(id: string | null): void {
 
 export function loadMemories(): MemoryItem[] {
   try {
-    const raw = localStorage.getItem(MEMORIES_KEY) || localStorage.getItem('cali_agency_memories_v020');
+    const raw = localStorage.getItem(MEMORIES_KEY) || localStorage.getItem('cali_agency_memories_v030');
     if (raw) return JSON.parse(raw) as MemoryItem[];
   } catch {
     // ignore
@@ -78,18 +98,26 @@ export function upsertMemory(
 
 export function loadProfile(): UserProfile {
   try {
-    const raw = localStorage.getItem(PROFILE_KEY) || localStorage.getItem('cali_agency_profile_v020');
-    if (raw) return JSON.parse(raw) as UserProfile;
+    const raw = localStorage.getItem(PROFILE_KEY) || localStorage.getItem('cali_agency_profile_v030');
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<UserProfile>;
+      const base = createFreshProfile();
+      const topics = p.onboarding_topics
+        ? { ...base.onboarding_topics, ...p.onboarding_topics }
+        : p.onboarding_complete
+        ? { name_vibe: true, design_taste: true, tech_stack: true, autonomy: true }
+        : base.onboarding_topics;
+      return {
+        ...base,
+        ...p,
+        onboarding_topics: topics,
+        onboarding_complete: Boolean(p.onboarding_complete)
+      };
+    }
   } catch {
     // ignore
   }
-  return {
-    preferred_name: null,
-    honorific: null,
-    language_pref: 'en',
-    onboarding_step: 1,
-    onboarding_complete: false
-  };
+  return createFreshProfile();
 }
 
 export function saveProfile(profile: UserProfile): void {
@@ -98,7 +126,7 @@ export function saveProfile(profile: UserProfile): void {
 
 export function loadGitHubConfig(): GitHubConfig {
   try {
-    const raw = localStorage.getItem(GITHUB_CFG_KEY) || localStorage.getItem('cali_agency_github_v020');
+    const raw = localStorage.getItem(GITHUB_CFG_KEY) || localStorage.getItem('cali_agency_github_v030');
     if (raw) return JSON.parse(raw) as GitHubConfig;
   } catch {
     // ignore
@@ -110,24 +138,22 @@ export function saveGitHubConfig(cfg: GitHubConfig): void {
   localStorage.setItem(GITHUB_CFG_KEY, JSON.stringify(cfg));
 }
 
-export async function exportProjectZip(project: ProjectState): Promise<void> {
-  const zip = new JSZip();
-  const folderName = project.project_name.toLowerCase().replace(/[^a-z0-9-]+/g, '-') || 'pwa-project';
-  const root = zip.folder(folderName)!;
-  root.file('project-blueprint.md', project.blueprint_md || '# Blueprint');
-  root.file('project_state.json', JSON.stringify({ ...project, files: undefined, snapshots: undefined }, null, 2));
-  for (const [path, content] of Object.entries(project.files)) {
-    root.file(path.replace(/^\/+/, ''), content);
+export function loadAgentMetrics(): Record<string, AgentMetric> {
+  try {
+    const raw = localStorage.getItem(METRICS_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, AgentMetric>;
+  } catch {
+    // ignore
   }
-  const blob = await zip.generateAsync({ type: 'blob' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${folderName}.zip`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return {};
+}
+
+export function saveAgentMetrics(metrics: Record<string, AgentMetric>): void {
+  try {
+    localStorage.setItem(METRICS_KEY, JSON.stringify(metrics));
+  } catch {
+    // ignore
+  }
 }
 
 function toBase64Utf8(str: string): string {

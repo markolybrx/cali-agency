@@ -1,4 +1,4 @@
-import type { MemoryItem, PendingDecision, ProjectState, UserProfile } from '../types/agency';
+import type { MemoryItem, OnboardingTopics, PendingDecision, ProjectState, UserProfile } from '../types/agency';
 import { getPromptByRole } from '../prompts/agencyPrompts';
 import { callGeminiJson } from './geminiClient';
 import { keyPool } from './keyPool';
@@ -15,23 +15,35 @@ export interface CaliTurnResult {
     source: 'explicit_user' | 'inferred_from_chat' | 'user_correction';
     confidence: number;
   }>;
-  agency_command: 'NONE' | 'START_BLUEPRINT' | 'PAUSE_LOOP' | 'RESUME_LOOP' | 'APPROVE_PENDING';
-  blueprint_idea?: string;
+  completed_topics: Array<keyof OnboardingTopics>;
+  agency_command: 'NONE' | 'DRAFT_BLUEPRINT' | 'START_BLUEPRINT' | 'PAUSE_LOOP' | 'RESUME_LOOP' | 'APPROVE_PENDING';
+  blueprint_markdown?: string;
 }
 
-const ONBOARDING_FALLBACK_QUESTIONS = [
-  "Hey, I'm Cali—your Executive Director here. Before we spin up the 13-agent floor, what should I call you, and do you prefer clean English or natural Taglish?",
-  "Got it. What's your visual taste for apps we build? Any favorite typography, color accents, or UI pet peeves I should lock in for the UI Designer?",
-  "Noted. What's your go-to tech stack for quick PWAs—Vanilla HTML/CSS/JS, React + Vite + Tailwind, or something else?",
-  "Last one: how hands-on do you want to be? Should I pause at every Phase Gate for your sign-off, or run autonomously and only ping you on blockers?"
-];
-
-export function getOnboardingPrompt(step: number): string {
-  return ONBOARDING_FALLBACK_QUESTIONS[Math.min(step - 1, ONBOARDING_FALLBACK_QUESTIONS.length - 1)];
-}
+const CONVERSATIONAL_SYSTEM_ADDENDUM = `
+## CONVERSATIONAL ONBOARDING & BLUEPRINT RULES
+- Be genuinely conversational, warm, and natural—like a sharp creative partner over coffee, NOT a robotic survey or form.
+- If onboarding_complete is false, check which keys in user_profile.onboarding_topics are still false:
+  1. "name_vibe": user's preferred name and English vs Taglish vibe.
+  2. "design_taste": visual taste, colors, typography, or UI pet peeves.
+  3. "tech_stack": preferred default PWA stack.
+  4. "autonomy": whether to pause at Phase Gates or run autonomously until blockers.
+- Weave naturally into the next missing topic based on what the user actually said. If they answer multiple topics in one reply, acknowledge all of them and mark all answered topics in "completed_topics".
+- NEVER mark a topic in "completed_topics" unless the user actually answered it in this turn.
+- When the user pitches a PWA/app idea after onboarding, set "agency_command": "DRAFT_BLUEPRINT" and put a clean Markdown blueprint in "blueprint_markdown" so the user can review and approve it in a live card before the 13 agents start.
+- Return raw valid JSON:
+{
+  "message": "string",
+  "speech": "string or null",
+  "memory_ops": [],
+  "completed_topics": ["name_vibe"],
+  "agency_command": "NONE | DRAFT_BLUEPRINT | START_BLUEPRINT | PAUSE_LOOP | RESUME_LOOP | APPROVE_PENDING",
+  "blueprint_markdown": "optional markdown string"
+}`;
 
 export async function runCaliTurn(params: {
   userMessage: string;
+  history: Array<{ role: 'user' | 'cali'; text: string }>;
   profile: UserProfile;
   memories: MemoryItem[];
   activeProject: ProjectState | null;
@@ -39,69 +51,80 @@ export async function runCaliTurn(params: {
 }): Promise<CaliTurnResult> {
   const caliSlot = keyPool.getCaliKey();
 
+  // Smart offline conversational fallback when KEY_CALI is not yet configured
   if (!caliSlot) {
     if (!params.profile.onboarding_complete) {
-      const step = params.profile.onboarding_step;
-      const keys = ['user.preferred_name', 'design.taste', 'stack.default', 'agency.autonomy'];
-      const ops: CaliTurnResult['memory_ops'] = [
-        {
-          op: 'upsert',
-          type: 'preference',
-          key: keys[step - 1] || `onboarding.step_${step}`,
-          value: params.userMessage.trim(),
-          triggers: ['onboarding', 'preference'],
-          source: 'explicit_user',
-          confidence: 0.95
-        }
-      ];
-      if (step >= 4) {
-        ops.push({
-          op: 'upsert',
-          type: 'standing_rule',
-          key: 'user.onboarding_complete',
-          value: 'true',
-          triggers: ['onboarding'],
-          source: 'explicit_user',
-          confidence: 1.0
-        });
+      const t = params.profile.onboarding_topics;
+      const missing = (['name_vibe', 'design_taste', 'tech_stack', 'autonomy'] as Array<keyof OnboardingTopics>).filter(
+        (k) => !t[k]
+      );
+      const currentTopic = missing[0];
+      const nextTopic = missing[1];
+      const ops: CaliTurnResult['memory_ops'] = currentTopic
+        ? [
+            {
+              op: 'upsert',
+              type: 'preference',
+              key: currentTopic === 'name_vibe' ? 'user.preferred_name' : `onboarding.${currentTopic}`,
+              value: params.userMessage.trim(),
+              triggers: ['onboarding', currentTopic],
+              source: 'explicit_user',
+              confidence: 0.95
+            }
+          ]
+        : [];
+
+      const followUps: Record<keyof OnboardingTopics, string> = {
+        name_vibe: 'First up—what should I call you, and do you prefer clean English or natural Taglish?',
+        design_taste:
+          'Nice to meet you. Before I brief the UI Designer, what kind of app aesthetic do you actually love—and any UI pet peeves I should ban?',
+        tech_stack:
+          'Solid taste—I locked that in. For quick PWAs we build together, do you have a favorite stack (like Vanilla JS, React + Vite, Tailwind), or should I pick the leanest one per project?',
+        autonomy:
+          'Got it. Last thing before I unlock the agency floor: want me to pause and check in with you at every Phase Gate, or keep the 13 agents rolling until we hit a real blocker?'
+      };
+
+      if (!nextTopic) {
         return {
           message:
-            "All locked in. I've briefed the floor on your taste and autonomy rules. Add your API keys in Settings (and tap Save) to start building your first blueprint.",
+            'Love it—we are completely aligned. I have saved your profile and unlocked the Monolith HQ dashboard. Whenever you are ready for live AI reasoning, drop your KEY_CALI in Settings and tap Save.',
           speech: null,
           memory_ops: ops,
+          completed_topics: currentTopic ? [currentTopic] : [],
           agency_command: 'NONE'
         };
       }
+
       return {
-        message: ONBOARDING_FALLBACK_QUESTIONS[step],
+        message: followUps[nextTopic],
         speech: null,
         memory_ops: ops,
+        completed_topics: currentTopic ? [currentTopic] : [],
         agency_command: 'NONE'
       };
     }
 
     const lower = params.userMessage.toLowerCase();
     if (lower.includes('pause')) {
-      return { message: 'Pausing the agency loop now.', speech: null, memory_ops: [], agency_command: 'PAUSE_LOOP' };
+      return { message: 'Pausing the agency floor now.', speech: null, memory_ops: [], completed_topics: [], agency_command: 'PAUSE_LOOP' };
     }
     if (lower.includes('resume') || lower.includes('start')) {
-      return { message: 'Resuming the agency floor.', speech: null, memory_ops: [], agency_command: 'RESUME_LOOP' };
+      return { message: 'Resuming production on the agency floor.', speech: null, memory_ops: [], completed_topics: [], agency_command: 'RESUME_LOOP' };
     }
     return {
-      message: 'Add your dedicated KEY_CALI in Settings and tap Save Settings for live Gemini reasoning.',
+      message: 'Configure KEY_CALI in Settings (and tap Save Settings) so I can converse live and draft blueprints for your 13 agents.',
       speech: null,
       memory_ops: [],
+      completed_topics: [],
       agency_command: 'NONE'
     };
   }
 
   const directorPrompt = getPromptByRole('cali');
-  const onboardingPrompt = getPromptByRole('cali-onboarding');
-  const systemPrompt = params.profile.onboarding_complete
-    ? directorPrompt.content
-    : `${directorPrompt.content}\n\n---\n\n${onboardingPrompt.content}`;
+  const systemPrompt = `${directorPrompt.content}\n\n---\n\n${CONVERSATIONAL_SYSTEM_ADDENDUM}`;
 
   const payload = {
+    conversation_history: params.history.slice(-8),
     user_message: params.userMessage,
     user_profile: params.profile,
     memories: params.memories.slice(0, 12),
@@ -122,14 +145,15 @@ export async function runCaliTurn(params: {
     systemPrompt,
     userPayload: JSON.stringify(payload),
     thinkingLevel: directorPrompt.thinkingLevel,
-    temperature: 0.55
+    temperature: 0.65
   });
 
   return {
-    message: res.data.message || 'Done.',
+    message: res.data.message || 'Got it.',
     speech: res.data.speech ?? null,
     memory_ops: Array.isArray(res.data.memory_ops) ? res.data.memory_ops : [],
+    completed_topics: Array.isArray(res.data.completed_topics) ? res.data.completed_topics : [],
     agency_command: res.data.agency_command || 'NONE',
-    blueprint_idea: res.data.blueprint_idea
+    blueprint_markdown: res.data.blueprint_markdown
   };
 }

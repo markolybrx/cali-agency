@@ -5,7 +5,6 @@ import { keyPool } from '../../engine/keyPool';
 
 interface TelemetryDrawerProps {
   open: boolean;
-  onClose: () => void;
   t: ThemeTokens;
   keys: KeySlotState[];
   telemetry: TelemetrySummary;
@@ -14,7 +13,6 @@ interface TelemetryDrawerProps {
 
 export const TelemetryDrawer: React.FC<TelemetryDrawerProps> = ({
   open,
-  onClose,
   t,
   keys,
   telemetry,
@@ -37,21 +35,13 @@ export const TelemetryDrawer: React.FC<TelemetryDrawerProps> = ({
   };
 
   return (
-    <div className={`absolute inset-0 z-30 flex flex-col backdrop-blur-2xl p-4 ${t.overlay}`}>
-      <div className="flex items-center justify-between pb-3 border-b border-current/10 shrink-0">
-        <div>
-          <h3 className="text-base font-semibold leading-none">Telemetry &amp; 5-Key Health</h3>
-          <p className="text-[11px] opacity-60 mt-1">Rolling 60s RPM • Daily RPD • Context Window</p>
-        </div>
-        <button type="button" onClick={onClose} className="p-2 rounded-full border border-current/15 cursor-pointer">
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+    <div className={`absolute inset-0 z-20 flex flex-col backdrop-blur-2xl p-4 ${t.overlay}`}>
+      <div className="pb-3 border-b border-current/10 shrink-0">
+        <h3 className="text-base font-semibold leading-none">Telemetry &amp; 5-Key Health</h3>
+        <p className="text-[11px] opacity-60 mt-1">Rolling 60s RPM • Daily RPD • Context Window</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-4 pb-24 space-y-4">
+      <div className="flex-1 overflow-y-auto py-4 pb-28 space-y-4">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div className={`rounded-2xl border p-3 ${t.surface}`}>
             <div className="text-[10px] uppercase opacity-55">Total Tokens</div>

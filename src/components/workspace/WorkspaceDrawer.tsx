@@ -1,17 +1,18 @@
 import React, { useMemo, useState } from 'react';
 import type { PhaseSnapshot, ProjectState } from '../../types/agency';
 import type { ThemeTokens } from '../../theme/themes';
-import { exportProjectZip, type GitHubConfig, shipProjectToGitHub } from '../../engine/storage';
+import { type GitHubConfig, shipProjectToGitHub } from '../../engine/storage';
+import { generatePwaIconsAndManifest, saveZipLocally } from '../../engine/localSave';
 import type { ConfirmState } from '../common/ConfirmModal';
 
 interface WorkspaceDrawerProps {
   open: boolean;
-  onClose: () => void;
   t: ThemeTokens;
   project: ProjectState | null;
   githubConfig: GitHubConfig;
   onSendErrorToDebugger: (errorLog: string) => void;
   onRollbackSnapshot: (snapshot: PhaseSnapshot) => void;
+  onAddGeneratedAssets: (files: Record<string, string>) => void;
   onDeleteProject: (projectId: string) => void;
   onRequestConfirm: (state: ConfirmState) => void;
   onToast: (msg: string) => void;
@@ -19,12 +20,12 @@ interface WorkspaceDrawerProps {
 
 export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   open,
-  onClose,
   t,
   project,
   githubConfig,
   onSendErrorToDebugger,
   onRollbackSnapshot,
+  onAddGeneratedAssets,
   onDeleteProject,
   onRequestConfirm,
   onToast
@@ -66,6 +67,19 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
   if (!open) return null;
 
+  const handleSaveLocally = async () => {
+    if (!project) return;
+    const msg = await saveZipLocally(project);
+    onToast(msg);
+  };
+
+  const handleGenerateIcons = () => {
+    if (!project) return;
+    const assets = generatePwaIconsAndManifest(project.project_name);
+    onAddGeneratedAssets(assets);
+    onToast('Generated SVG PWA icons & manifest.webmanifest');
+  };
+
   const handleShipGitHub = async () => {
     if (!project) return;
     setShipping(true);
@@ -80,20 +94,23 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   };
 
   return (
-    <div className={`absolute inset-0 z-30 flex flex-col backdrop-blur-2xl p-4 ${t.overlay}`}>
+    <div className={`absolute inset-0 z-20 flex flex-col backdrop-blur-2xl p-4 ${t.overlay}`}>
       <div className="flex items-center justify-between pb-3 border-b border-current/10 shrink-0">
         <div>
-          <h3 className="text-base font-semibold leading-none">Workspace &amp; Ship</h3>
+          <h3 className="text-base font-semibold leading-none">Workspace &amp; Local Save</h3>
           <p className="text-[11px] opacity-60 mt-1">
             {project ? `${project.project_name} • ${fileList.length} files` : 'No active project'}
           </p>
         </div>
-        <button type="button" onClick={onClose} className="p-2 rounded-full border border-current/15 cursor-pointer">
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+        {project && (
+          <button
+            type="button"
+            onClick={handleGenerateIcons}
+            className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer ${t.secondaryBtn}`}
+          >
+            + PWA Icons
+          </button>
+        )}
       </div>
 
       <div className="py-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
@@ -125,10 +142,10 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
           <button
             type="button"
             disabled={!project}
-            onClick={() => project && exportProjectZip(project)}
+            onClick={handleSaveLocally}
             className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer disabled:opacity-40 ${t.secondaryBtn}`}
           >
-            Export .zip
+            Save Locally (.zip)
           </button>
           <button
             type="button"
@@ -141,15 +158,15 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto pb-20 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto pb-28 space-y-3">
         {!project ? (
           <div className={`rounded-2xl border p-6 text-center text-xs opacity-65 ${t.surface}`}>
-            No active project yet. Import a Markdown blueprint from the dashboard or chat with Cali.
+            No active project yet. Import a Markdown blueprint from Home or chat with Cali.
           </div>
         ) : tab === 'files' ? (
           fileList.length === 0 ? (
             <div className={`rounded-2xl border p-6 text-center text-xs opacity-65 ${t.surface}`}>
-              Project initialized. Start production to generate files.
+              Project initialized. Start production or tap + PWA Icons to scaffold manifest &amp; icons.
             </div>
           ) : (
             <>
@@ -173,7 +190,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                     <span>{activePath}</span>
                     <span>{project.files[activePath].split('\n').length} lines</span>
                   </div>
-                  <pre className="p-3.5 text-[11px] font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-h-[52vh]">
+                  <pre className="p-3.5 text-[11px] font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-h-[50vh]">
                     {project.files[activePath]}
                   </pre>
                 </div>
@@ -241,7 +258,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                     onClick={() =>
                       onRequestConfirm({
                         title: `Roll back to Phase ${snap.phase_id}?`,
-                        message: `This will replace the current workspace files with the ${snap.file_count} files from "${snap.phase_name}".`,
+                        message: `Replace current workspace files with the ${snap.file_count} files from "${snap.phase_name}"?`,
                         confirmLabel: 'Roll Back Files',
                         onConfirm: () => onRollbackSnapshot(snap)
                       })
@@ -256,7 +273,6 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
           </div>
         )}
 
-        {/* Danger Zone: Delete Project */}
         {project && (
           <div className="rounded-2xl border border-rose-500/35 bg-rose-950/20 p-3.5 flex items-center justify-between gap-3 mt-4">
             <div>

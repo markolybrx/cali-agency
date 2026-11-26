@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { KeySlotState, TelemetrySummary } from '../../types/agency';
+import type { AgentMetric, KeySlotState, TelemetrySummary } from '../../types/agency';
 import type { ThemeTokens } from '../../theme/themes';
 import {
   OFFICE_HEIGHT,
@@ -57,10 +57,10 @@ export const MiniOfficePreview: React.FC<MiniOfficeProps> = ({ agentsRef, packet
 
 interface OfficeDrawerProps {
   open: boolean;
-  onClose: () => void;
   t: ThemeTokens;
   keys: KeySlotState[];
   telemetry: TelemetrySummary;
+  agentMetrics: Record<string, AgentMetric>;
   agentsRef: React.MutableRefObject<PixelSpriteAgent[]>;
   packetsRef: React.MutableRefObject<PacketFlight[]>;
   onTriggerDemoHandoff: () => void;
@@ -69,10 +69,10 @@ interface OfficeDrawerProps {
 
 export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
   open,
-  onClose,
   t,
   keys,
   telemetry,
+  agentMetrics,
   agentsRef,
   packetsRef,
   onTriggerDemoHandoff,
@@ -110,32 +110,22 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
     setSelectedAgent(hit ? { ...hit } : null);
   };
 
+  const metric = selectedAgent ? agentMetrics[selectedAgent.id] : null;
+
   return (
-    <div className={`absolute inset-0 z-30 flex flex-col backdrop-blur-2xl ${t.overlay}`}>
+    <div className={`absolute inset-0 z-20 flex flex-col backdrop-blur-2xl ${t.overlay}`}>
       <div className="px-4 py-3.5 border-b border-current/10 flex items-center justify-between gap-2 shrink-0">
         <div>
           <h3 className="text-base font-semibold leading-none">Cali AI Office</h3>
           <p className="text-[11px] opacity-60 mt-1">13 Pixel Agents + Cali Executive Suite</p>
         </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setViewMode(viewMode === 'canvas' ? 'grid' : 'canvas')}
-            className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer ${t.secondaryBtn}`}
-          >
-            {viewMode === 'canvas' ? 'Mobile Grid' : 'Floorplan'}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-full border border-current/15 opacity-75 hover:opacity-100 cursor-pointer"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setViewMode(viewMode === 'canvas' ? 'grid' : 'canvas')}
+          className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer ${t.secondaryBtn}`}
+        >
+          {viewMode === 'canvas' ? 'Mobile Grid' : 'Floorplan'}
+        </button>
       </div>
 
       <div className="px-4 py-2.5 border-b border-current/10 space-y-2 shrink-0">
@@ -174,7 +164,7 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 pb-24 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 pb-28 space-y-3">
         {viewMode === 'canvas' ? (
           <div className="rounded-2xl overflow-hidden border border-current/15 shadow-xl bg-[#3D2716]">
             <canvas
@@ -225,17 +215,38 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
           Test Packet Handoff Animation
         </button>
 
+        {/* Agent Latency & Token Inspector */}
         {selectedAgent && (
-          <div className={`rounded-2xl border p-3.5 space-y-1.5 ${t.accentCard}`}>
+          <div className={`rounded-2xl border p-4 space-y-2.5 ${t.accentCard}`}>
             <div className="flex items-center justify-between">
               <div className="text-xs font-semibold">
                 {selectedAgent.shortName} — {selectedAgent.roleLabel}
               </div>
               <span className="text-[10px] font-mono uppercase text-accent">{selectedAgent.state}</span>
             </div>
-            <p className="text-[11px] opacity-80">
-              {selectedAgent.speech || 'Standing by at desk for next Master Orchestrator ticket.'}
+            <p className="text-[11px] opacity-85">
+              {selectedAgent.speech || metric?.lastTask || 'Standing by at desk for next Master Orchestrator ticket.'}
             </p>
+            <div className="grid grid-cols-4 gap-1.5 pt-1 text-center">
+              <div className="rounded-xl bg-black/20 p-2">
+                <div className="text-[9px] opacity-55 uppercase">Calls</div>
+                <div className="text-xs font-mono font-semibold">{metric?.calls || 0}</div>
+              </div>
+              <div className="rounded-xl bg-black/20 p-2">
+                <div className="text-[9px] opacity-55 uppercase">Latency</div>
+                <div className="text-xs font-mono font-semibold">
+                  {metric ? `${(metric.lastLatencyMs / 1000).toFixed(1)}s` : '—'}
+                </div>
+              </div>
+              <div className="rounded-xl bg-black/20 p-2">
+                <div className="text-[9px] opacity-55 uppercase">Tokens</div>
+                <div className="text-xs font-mono font-semibold">{metric?.totalTokens.toLocaleString() || 0}</div>
+              </div>
+              <div className="rounded-xl bg-black/20 p-2">
+                <div className="text-[9px] opacity-55 uppercase">Retries</div>
+                <div className="text-xs font-mono font-semibold">{metric?.retries || 0}</div>
+              </div>
+            </div>
           </div>
         )}
       </div>

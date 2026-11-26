@@ -54,6 +54,17 @@ export type WorkerAgentId =
 
 export type AgentVisualState = 'IDLE' | 'WALKING' | 'THINKING' | 'CODING' | 'REVIEWING' | 'BLOCKED' | 'TALKING';
 
+export interface AgentMetric {
+  agentId: WorkerAgentId | 'cali';
+  calls: number;
+  lastLatencyMs: number;
+  avgLatencyMs: number;
+  totalTokens: number;
+  retries: number;
+  lastTask: string;
+  updatedAt: string;
+}
+
 export interface AgencyTask {
   task_id: string;
   title: string;
@@ -151,13 +162,21 @@ export interface ChatMessage {
   text: string;
   meta?: string;
   ts: string;
+  blueprintDraft?: string;
+}
+
+export interface OnboardingTopics {
+  name_vibe: boolean;
+  design_taste: boolean;
+  tech_stack: boolean;
+  autonomy: boolean;
 }
 
 export interface UserProfile {
   preferred_name: string | null;
   honorific: string | null;
   language_pref: LanguagePref;
-  onboarding_step: number;
+  onboarding_topics: OnboardingTopics;
   onboarding_complete: boolean;
 }
 
