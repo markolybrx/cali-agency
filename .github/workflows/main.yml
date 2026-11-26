@@ -25,11 +25,14 @@ jobs:
           java-version: '17'
 
       - name: Restore Persistent Debug Keystore (if configured)
-        if: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
         run: |
-          mkdir -p ~/.android
-          echo "${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}" | base64 --decode > ~/.android/debug.keystore
-          echo "Restored persistent debug.keystore for seamless in-place APK upgrades."
+          if [ -n "$KEYSTORE_B64" ]; then
+            mkdir -p ~/.android
+            echo "$KEYSTORE_B64" | base64 --decode > ~/.android/debug.keystore
+            echo "Restored persistent debug.keystore."
+          fi
 
       - name: Read Version Metadata from package.json
         run: |
