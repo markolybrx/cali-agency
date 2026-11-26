@@ -1,5 +1,5 @@
 import type { KeySlotId, ThinkingLevel } from '../types/agency';
-import { keyPool } from './keyPool';
+import { DEFAULT_GEMINI_MODEL, keyPool } from './keyPool';
 
 export interface GeminiCallOptions {
   keyId: KeySlotId;
@@ -23,8 +23,6 @@ export interface GeminiJsonResult<T = unknown> {
   finishReason: string;
 }
 
-const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-
 function extractJsonString(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) return trimmed;
@@ -44,22 +42,21 @@ export async function callGeminiJson<T = Record<string, unknown>>(opts: GeminiCa
     throw new Error(`API key ${opts.keyId} is not configured.`);
   }
 
-  const model = opts.model || DEFAULT_MODEL;
-  const isAq = slot.apiKey.startsWith('AQ.');
-  const url = isAq
-    ? `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
-    : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(slot.apiKey)}`;
+  const model = opts.model || slot.selectedModel || DEFAULT_GEMINI_MODEL;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
-  const headers: Record<string, string> = isAq
-    ? { 'Content-Type': 'application/json', Authorization: `Bearer ${slot.apiKey}`, 'x-goog-api-key': slot.apiKey }
-    : { 'Content-Type': 'application/json' };
+  // Native Gemini header auth works cleanly for both AQ.xxxx Auth keys and AIza... keys
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-goog-api-key': slot.apiKey
+  };
 
   const generationConfig: Record<string, unknown> = {
     temperature: opts.temperature ?? 0.35,
     responseMimeType: 'application/json'
   };
 
-  if (opts.thinkingLevel) {
+  if (opts.thinkingLevel && (model.includes('3.') || model.includes('2.5'))) {
     generationConfig.thinkingConfig = {
       thinkingLevel: opts.thinkingLevel.toUpperCase()
     };

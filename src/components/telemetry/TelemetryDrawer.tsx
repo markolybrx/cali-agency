@@ -33,7 +33,7 @@ export const TelemetryDrawer: React.FC<TelemetryDrawerProps> = ({
       if (res.ok) okCount += 1;
     }
     setTesting(false);
-    onToast(`Health check done: ${okCount} healthy keys`);
+    onToast(`Health & model scan done: ${okCount} healthy keys`);
   };
 
   return (
@@ -51,8 +51,7 @@ export const TelemetryDrawer: React.FC<TelemetryDrawerProps> = ({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-4 space-y-4">
-        {/* Global Counters */}
+      <div className="flex-1 overflow-y-auto py-4 pb-24 space-y-4">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div className={`rounded-2xl border p-3 ${t.surface}`}>
             <div className="text-[10px] uppercase opacity-55">Total Tokens</div>
@@ -72,7 +71,6 @@ export const TelemetryDrawer: React.FC<TelemetryDrawerProps> = ({
           </div>
         </div>
 
-        {/* Context Bar */}
         <div className={`rounded-2xl border p-3.5 space-y-2 ${t.surface}`}>
           <div className="flex justify-between text-[11px]">
             <span className="font-medium">Peak Context Window (1M cap)</span>
@@ -83,33 +81,31 @@ export const TelemetryDrawer: React.FC<TelemetryDrawerProps> = ({
           </div>
         </div>
 
-        {/* Test All Button */}
         <button
           type="button"
           disabled={testing}
           onClick={handleTestAll}
           className={`w-full py-2.5 rounded-full text-xs font-semibold cursor-pointer disabled:opacity-50 ${t.primaryBtn}`}
         >
-          {testing ? 'Probing All Configured Keys…' : 'Test All 5 Keys Now'}
+          {testing ? 'Probing Keys & Detecting Models…' : 'Test All 5 Keys & Detect Models'}
         </button>
 
-        {/* Per-Key Breakdown */}
         <div className="space-y-2.5">
           {keys.map((k) => {
             const rpmPct = Math.min(100, (k.rpmTimestamps.length / 15) * 100);
             const cd = k.cooldownUntil ? Math.max(0, Math.ceil((k.cooldownUntil - Date.now()) / 1000)) : 0;
             return (
               <div key={k.id} className={`rounded-2xl border p-3.5 space-y-2 ${t.surface}`}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-semibold">
-                      {k.id} <span className="opacity-55 font-normal">• {k.label}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold truncate">
+                      {k.id} <span className="opacity-55 font-normal">• {k.selectedModel}</span>
                     </div>
                     <div className="text-[10px] font-mono opacity-60">
                       In: {k.promptTokens.toLocaleString()} • Out: {k.outputTokens.toLocaleString()} • RPD: {k.rpdCount}
                     </div>
                   </div>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono border ${t.subtleBadge}`}>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono border shrink-0 ${t.subtleBadge}`}>
                     {cd > 0 ? `COOLDOWN ${cd}s` : k.status}
                   </span>
                 </div>

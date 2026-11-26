@@ -1,11 +1,11 @@
 import JSZip from 'jszip';
 import type { MemoryItem, ProjectState, UserProfile } from '../types/agency';
 
-const PROJECTS_KEY = 'cali_agency_projects_v020';
-const ACTIVE_PROJECT_KEY = 'cali_agency_active_project_v020';
-const MEMORIES_KEY = 'cali_agency_memories_v020';
-const PROFILE_KEY = 'cali_agency_profile_v020';
-const GITHUB_CFG_KEY = 'cali_agency_github_v020';
+const PROJECTS_KEY = 'cali_agency_projects_v030';
+const ACTIVE_PROJECT_KEY = 'cali_agency_active_project_v030';
+const MEMORIES_KEY = 'cali_agency_memories_v030';
+const PROFILE_KEY = 'cali_agency_profile_v030';
+const GITHUB_CFG_KEY = 'cali_agency_github_v030';
 
 export interface GitHubConfig {
   token: string;
@@ -16,8 +16,10 @@ export interface GitHubConfig {
 
 export function loadProjects(): ProjectState[] {
   try {
-    const raw = localStorage.getItem(PROJECTS_KEY);
-    return raw ? (JSON.parse(raw) as ProjectState[]) : [];
+    const raw = localStorage.getItem(PROJECTS_KEY) || localStorage.getItem('cali_agency_projects_v020');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ProjectState[];
+    return parsed.map((p) => ({ ...p, snapshots: Array.isArray(p.snapshots) ? p.snapshots : [] }));
   } catch {
     return [];
   }
@@ -32,7 +34,7 @@ export function saveProjects(projects: ProjectState[]): void {
 }
 
 export function loadActiveProjectId(): string | null {
-  return localStorage.getItem(ACTIVE_PROJECT_KEY);
+  return localStorage.getItem(ACTIVE_PROJECT_KEY) || localStorage.getItem('cali_agency_active_project_v020');
 }
 
 export function saveActiveProjectId(id: string | null): void {
@@ -42,7 +44,7 @@ export function saveActiveProjectId(id: string | null): void {
 
 export function loadMemories(): MemoryItem[] {
   try {
-    const raw = localStorage.getItem(MEMORIES_KEY);
+    const raw = localStorage.getItem(MEMORIES_KEY) || localStorage.getItem('cali_agency_memories_v020');
     if (raw) return JSON.parse(raw) as MemoryItem[];
   } catch {
     // ignore
@@ -76,7 +78,7 @@ export function upsertMemory(
 
 export function loadProfile(): UserProfile {
   try {
-    const raw = localStorage.getItem(PROFILE_KEY);
+    const raw = localStorage.getItem(PROFILE_KEY) || localStorage.getItem('cali_agency_profile_v020');
     if (raw) return JSON.parse(raw) as UserProfile;
   } catch {
     // ignore
@@ -96,7 +98,7 @@ export function saveProfile(profile: UserProfile): void {
 
 export function loadGitHubConfig(): GitHubConfig {
   try {
-    const raw = localStorage.getItem(GITHUB_CFG_KEY);
+    const raw = localStorage.getItem(GITHUB_CFG_KEY) || localStorage.getItem('cali_agency_github_v020');
     if (raw) return JSON.parse(raw) as GitHubConfig;
   } catch {
     // ignore
@@ -113,7 +115,7 @@ export async function exportProjectZip(project: ProjectState): Promise<void> {
   const folderName = project.project_name.toLowerCase().replace(/[^a-z0-9-]+/g, '-') || 'pwa-project';
   const root = zip.folder(folderName)!;
   root.file('project-blueprint.md', project.blueprint_md || '# Blueprint');
-  root.file('project_state.json', JSON.stringify({ ...project, files: undefined }, null, 2));
+  root.file('project_state.json', JSON.stringify({ ...project, files: undefined, snapshots: undefined }, null, 2));
   for (const [path, content] of Object.entries(project.files)) {
     root.file(path.replace(/^\/+/, ''), content);
   }

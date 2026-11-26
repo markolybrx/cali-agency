@@ -36,9 +36,7 @@ export const OFFICE_HEIGHT = 400;
 
 export function createInitialAgents(): PixelSpriteAgent[] {
   const defs: Array<[WorkerAgentId | 'cali', string, string, number, number, string, string, string]> = [
-    // Cali in Top-Right Glass Conference/Director Suite
     ['cali', 'Cali (Dir)', 'Executive Director', 525, 118, '#6C4CD1', '#1E1B4B', '#F5D0B5'],
-    // 3x3 Main Wooden Desk Grid (matching photo)
     ['master-orchestrator', '01. Orch', 'Master Orchestrator', 132, 134, '#7C3AED', '#292524', '#F3C6A5'],
     ['project-planner', '00. Plan', 'Project Planner', 252, 134, '#0EA5E9', '#451A03', '#F5D0B5'],
     ['ui-designer', '03. UI', 'UI Designer', 372, 134, '#EC4899', '#7C2D12', '#F7D7BE'],
@@ -48,7 +46,6 @@ export function createInitialAgents(): PixelSpriteAgent[] {
     ['backend-developer', '06. Back', 'Backend Dev', 132, 290, '#059669', '#1E293B', '#F3C6A5'],
     ['code-reviewer', '07. Audit', 'Code Reviewer', 252, 290, '#D97706', '#422006', '#F5D0B5'],
     ['qa-tester', '08. QA', 'QA Tester', 372, 290, '#EA580C', '#292524', '#F7D7BE'],
-    // Reception & Break Lounge (bottom-right red sofas + lower floor)
     ['debugger', '09. Debug', 'Debugger', 506, 266, '#DC2626', '#18181B', '#F3C6A5'],
     ['accessibility-tester', '11. A11y', 'A11y Tester', 570, 266, '#0D9488', '#451A03', '#F5D0B5'],
     ['performance-engineer', '12. Perf', 'Perf Engineer', 506, 332, '#CA8A04', '#1E1B4B', '#EAC0A0'],
@@ -89,7 +86,6 @@ export function stepOfficeSimulation(
       a.speechUntil = 0;
     }
 
-    // Subtle idle roaming near desk or coffee lounge so office feels alive
     if (a.state === 'IDLE') {
       a.roamCooldown -= 1;
       if (a.roamCooldown <= 0) {
@@ -104,7 +100,6 @@ export function stepOfficeSimulation(
         a.roamCooldown = 140 + Math.floor(Math.random() * 180);
       }
     } else {
-      // Return to desk when actively coding/reviewing
       a.targetX = a.homeX;
       a.targetY = a.homeY;
     }
@@ -140,7 +135,6 @@ export function renderPixelOffice(
 ): void {
   ctx.imageSmoothingEnabled = false;
 
-  // 1. Warm Hardwood Plank Flooring
   ctx.fillStyle = '#B87B44';
   ctx.fillRect(0, 0, OFFICE_WIDTH, OFFICE_HEIGHT);
   for (let y = 58; y < OFFICE_HEIGHT; y += 14) {
@@ -153,25 +147,22 @@ export function renderPixelOffice(
     }
   }
 
-  // 2. Top Wall, Wood Trim, Kitchenette & Bookshelves (matching photo)
   ctx.fillStyle = '#4A311E';
   ctx.fillRect(0, 0, OFFICE_WIDTH, 58);
   ctx.fillStyle = '#6B482C';
   ctx.fillRect(0, 52, OFFICE_WIDTH, 6);
 
-  // Kitchenette (top-left)
   ctx.fillStyle = '#7A5434';
   ctx.fillRect(14, 16, 118, 36);
   ctx.fillStyle = '#D6C7B2';
-  ctx.fillRect(18, 22, 28, 16); // Sink
+  ctx.fillRect(18, 22, 28, 16);
   ctx.fillStyle = '#94A3B8';
   ctx.fillRect(22, 25, 20, 10);
   ctx.fillStyle = '#334155';
-  ctx.fillRect(54, 18, 18, 22); // Coffee maker
+  ctx.fillRect(54, 18, 18, 22);
   ctx.fillStyle = '#EF4444';
   ctx.fillRect(60, 22, 6, 4);
 
-  // Center Signboard "CALI AI OFFICE"
   ctx.fillStyle = '#291B12';
   ctx.fillRect(204, 14, 168, 28);
   ctx.strokeStyle = '#C99A63';
@@ -182,7 +173,6 @@ export function renderPixelOffice(
   ctx.textAlign = 'center';
   ctx.fillText('CALI AI OFFICE', 288, 32);
 
-  // Bookshelf (top-mid-right)
   ctx.fillStyle = '#5C3A21';
   ctx.fillRect(386, 12, 66, 40);
   const bookColors = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
@@ -193,13 +183,11 @@ export function renderPixelOffice(
     }
   }
 
-  // 3. Top-Right Glass-Walled Conference / Cali Director Suite (teal carpet + oval table)
   ctx.fillStyle = '#265359';
   ctx.fillRect(466, 58, 164, 134);
   ctx.strokeStyle = '#5EEAD4';
   ctx.lineWidth = 2;
   ctx.strokeRect(466, 58, 164, 134);
-  // Oval wooden conference table
   ctx.fillStyle = '#6D4322';
   ctx.beginPath();
   ctx.ellipse(548, 128, 46, 26, 0, 0, Math.PI * 2);
@@ -208,31 +196,27 @@ export function renderPixelOffice(
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // 4. Bottom-Right Break Lounge (red sofas + coffee table + potted plant)
   ctx.fillStyle = '#643B22';
   ctx.fillRect(466, 206, 164, 182);
   ctx.fillStyle = '#7E4A2B';
   ctx.fillRect(472, 212, 152, 170);
-  // Lounge label
   ctx.fillStyle = '#1E1510';
   ctx.fillRect(508, 216, 80, 15);
   ctx.fillStyle = '#FDE68A';
   ctx.font = 'bold 8px monospace';
   ctx.fillText('BREAK LOUNGE', 548, 226);
-  // Red Sofas
+
   ctx.fillStyle = '#991B1B';
   ctx.fillRect(478, 286, 20, 62);
   ctx.fillRect(598, 286, 20, 62);
   ctx.fillStyle = '#DC2626';
   ctx.fillRect(481, 290, 14, 54);
   ctx.fillRect(601, 290, 14, 54);
-  // Coffee Table
   ctx.fillStyle = '#5C3A21';
   ctx.fillRect(524, 300, 48, 34);
   ctx.fillStyle = '#92623A';
   ctx.fillRect(528, 304, 40, 26);
 
-  // Potted Plants
   const drawPlant = (px: number, py: number) => {
     ctx.fillStyle = '#92400E';
     ctx.fillRect(px - 6, py, 12, 10);
@@ -245,43 +229,35 @@ export function renderPixelOffice(
   drawPlant(24, 368);
   drawPlant(452, 368);
 
-  // 5. 3x3 Wooden Desk Grid + Monitors
   const deskCols = [132, 252, 372];
   const deskRows = [148, 226, 304];
   for (const ry of deskRows) {
     for (const cx of deskCols) {
-      // Desk shadow
       ctx.fillStyle = 'rgba(0,0,0,0.22)';
       ctx.fillRect(cx - 34, ry + 14, 68, 8);
-      // Desk surface
       ctx.fillStyle = '#7C4A22';
       ctx.fillRect(cx - 34, ry - 8, 68, 24);
       ctx.fillStyle = '#9C6234';
       ctx.fillRect(cx - 32, ry - 6, 64, 14);
-      // Monitor
       ctx.fillStyle = '#1E293B';
       ctx.fillRect(cx - 11, ry - 12, 22, 13);
       ctx.fillStyle = '#38BDF8';
       ctx.fillRect(cx - 9, ry - 10, 18, 9);
-      // Keyboard
       ctx.fillStyle = '#334155';
       ctx.fillRect(cx - 8, ry + 3, 16, 4);
     }
   }
 
-  // 6. Curved Reception Counter (bottom-center)
   ctx.fillStyle = '#7C4A22';
   ctx.fillRect(190, 356, 132, 22);
   ctx.fillStyle = '#C99A63';
   ctx.fillRect(194, 358, 124, 8);
 
-  // 7. Sort agents by Y for proper 2.5D depth overlap and draw pixel sprites
   const sorted = [...agents].sort((a, b) => a.y - b.y);
   for (const a of sorted) {
     drawChibiSprite(ctx, a, tick, a.id === selectedId);
   }
 
-  // 8. Glowing Packet Handoffs
   for (const pkt of packets) {
     const px = pkt.fromX + (pkt.toX - pkt.fromX) * pkt.progress;
     const py = pkt.fromY + (pkt.toY - pkt.fromY) * pkt.progress - Math.sin(pkt.progress * Math.PI) * 26;
@@ -320,7 +296,6 @@ function drawChibiSprite(
   const bob = isMoving ? Math.round(Math.sin(a.walkPhase) * 1.5) : 0;
   const armOffset = a.state === 'CODING' || a.state === 'REVIEWING' ? Math.round(Math.sin(tick * 0.45) * 1.5) : 0;
 
-  // Selection ring
   if (selected) {
     ctx.strokeStyle = '#FFB732';
     ctx.lineWidth = 2;
@@ -329,34 +304,27 @@ function drawChibiSprite(
     ctx.stroke();
   }
 
-  // Ground shadow
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fillRect(x - 7, y + 5, 14, 4);
 
-  // Legs (animated when walking)
   const leftLeg = isMoving ? Math.round(Math.sin(a.walkPhase) * 2) : 0;
   const rightLeg = isMoving ? -leftLeg : 0;
   ctx.fillStyle = '#1E293B';
   ctx.fillRect(x - 5, y + 1 + leftLeg, 4, 5);
   ctx.fillRect(x + 1, y + 1 + rightLeg, 4, 5);
 
-  // Torso / Shirt
   ctx.fillStyle = a.shirt;
   ctx.fillRect(x - 7, y - 9 + bob, 14, 11);
-  // Arms
   ctx.fillRect(x - 9, y - 7 + bob + armOffset, 2, 7);
   ctx.fillRect(x + 7, y - 7 + bob - armOffset, 2, 7);
 
-  // Head
   ctx.fillStyle = a.skin;
   ctx.fillRect(x - 6, y - 20 + bob, 12, 11);
-  // Hair
   ctx.fillStyle = a.hair;
   ctx.fillRect(x - 7, y - 22 + bob, 14, 5);
   ctx.fillRect(x - 7, y - 18 + bob, 2, 5);
   ctx.fillRect(x + 5, y - 18 + bob, 2, 5);
 
-  // Blinking Eyes
   const isBlinking = (tick + a.blinkOffset) % 140 < 6;
   ctx.fillStyle = '#111827';
   if (isBlinking) {
@@ -367,7 +335,6 @@ function drawChibiSprite(
     ctx.fillRect(x + 2, y - 15 + bob, 2, 3);
   }
 
-  // Dark Status-Pill Nameplate (1:1 like photo)
   const pillW = 64;
   const pillH = 13;
   const px = x - pillW / 2;
@@ -378,7 +345,6 @@ function drawChibiSprite(
   ctx.lineWidth = 1;
   ctx.strokeRect(px, py, pillW, pillH);
 
-  // Status dot inside pill
   const dotColor =
     a.state === 'CODING'
       ? '#34D399'
@@ -397,7 +363,6 @@ function drawChibiSprite(
   ctx.textAlign = 'left';
   ctx.fillText(a.shortName, px + 11, py + 9.5);
 
-  // Live Speech Bubble
   if (a.speech) {
     const label = a.speech.length > 26 ? `${a.speech.slice(0, 25)}…` : a.speech;
     const bw = Math.max(76, label.length * 5.2 + 12);

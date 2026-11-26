@@ -24,6 +24,7 @@ export interface ThemeTokens {
   userBubble: string;
   caliBubble: string;
   subtleBadge: string;
+  dockBg: string;
 }
 
 export const TEXT_ACCENTS: Record<AccentId, { dark: string; light: string; label: string }> = {
@@ -57,7 +58,8 @@ export const THEMES: Record<ThemeId, ThemeTokens> = {
     input: 'bg-white/[0.05] border-white/[0.12] text-zinc-100 placeholder-zinc-500 focus:border-[#8B5CF6]',
     userBubble: 'bg-[#6C4CD1] text-white border-transparent',
     caliBubble: 'bg-white/[0.05] text-zinc-100 border-white/[0.08]',
-    subtleBadge: 'bg-white/[0.07] text-zinc-300 border-white/[0.1]'
+    subtleBadge: 'bg-white/[0.07] text-zinc-300 border-white/[0.1]',
+    dockBg: 'bg-[#18181D]/92 border-white/[0.12] shadow-2xl shadow-black/60'
   },
   nocturne: {
     isLight: false,
@@ -82,7 +84,8 @@ export const THEMES: Record<ThemeId, ThemeTokens> = {
     input: 'bg-white/[0.05] border-white/[0.12] text-stone-100 placeholder-stone-500 focus:border-[#E7D5B8]',
     userBubble: 'bg-[#E7D5B8] text-[#141210] border-transparent',
     caliBubble: 'bg-white/[0.05] text-stone-100 border-white/[0.08]',
-    subtleBadge: 'bg-white/[0.07] text-stone-300 border-white/[0.1]'
+    subtleBadge: 'bg-white/[0.07] text-stone-300 border-white/[0.1]',
+    dockBg: 'bg-[#16141A]/92 border-white/[0.12] shadow-2xl shadow-black/60'
   },
   alabaster: {
     isLight: true,
@@ -107,6 +110,7 @@ export const THEMES: Record<ThemeId, ThemeTokens> = {
     input: 'bg-white border-zinc-900/[0.14] text-zinc-900 placeholder-zinc-400 focus:border-[#6C4CD1]',
     userBubble: 'bg-[#6C4CD1] text-white border-transparent',
     caliBubble: 'bg-white text-zinc-800 border-zinc-900/[0.1]',
-    subtleBadge: 'bg-zinc-900/[0.06] text-zinc-700 border-zinc-900/[0.1]'
+    subtleBadge: 'bg-zinc-900/[0.06] text-zinc-700 border-zinc-900/[0.1]',
+    dockBg: 'bg-white/95 border-zinc-900/[0.12] shadow-xl shadow-zinc-900/10'
   }
 };

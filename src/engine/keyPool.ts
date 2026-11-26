@@ -1,8 +1,9 @@
 import type { KeySlotId, KeySlotState, TelemetrySummary } from '../types/agency';
 
-const STORAGE_KEY = 'cali_agency_5keys_v020';
-const MAX_CONTEXT_WINDOW = 1_048_576; // 1M context window for Gemini Flash-Lite
+const STORAGE_KEY = 'cali_agency_5keys_v030';
+const MAX_CONTEXT_WINDOW = 1_048_576;
 const COOLDOWN_429_MS = 60_000;
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
 
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
@@ -15,6 +16,8 @@ function makeDefaultSlots(): Record<KeySlotId, KeySlotState> {
     label,
     role,
     apiKey: '',
+    selectedModel: DEFAULT_GEMINI_MODEL,
+    availableModels: [DEFAULT_GEMINI_MODEL],
     status: 'UNSET',
     cooldownUntil: null,
     backoffMs: 15_000,
@@ -63,7 +66,7 @@ export class FiveKeyPool {
   private load(): Record<KeySlotId, KeySlotState> {
     const defaults = makeDefaultSlots();
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('cali_agency_5keys_v020');
       if (!raw) return defaults;
       const parsed = JSON.parse(raw) as Partial<Record<KeySlotId, Partial<KeySlotState>>>;
       const today = todayKey();
@@ -72,10 +75,15 @@ export class FiveKeyPool {
         if (!s) return;
         const apiKey = typeof s.apiKey === 'string' ? s.apiKey.trim() : '';
         const sameDay = s.rpdDate === today;
+        const avail = Array.isArray(s.availableModels) && s.availableModels.length > 0
+          ? s.availableModels
+          : [s.selectedModel || DEFAULT_GEMINI_MODEL];
         defaults[id] = {
           ...defaults[id],
           ...s,
           apiKey,
+          selectedModel: s.selectedModel || DEFAULT_GEMINI_MODEL,
+          availableModels: avail,
           status: apiKey ? (s.status === 'INVALID' ? 'INVALID' : 'READY') : 'UNSET',
           cooldownUntil: null,
           rpmTimestamps: [],
@@ -125,13 +133,20 @@ export class FiveKeyPool {
     if (changed) this.emit();
   }
 
-  public setKey(id: KeySlotId, rawKey: string): void {
+  public setKeyConfig(id: KeySlotId, rawKey: string, selectedModel?: string, availableModels?: string[]): void {
     const clean = rawKey.trim();
     const slot = this.slots[id];
     slot.apiKey = clean;
+    if (selectedModel) slot.selectedModel = selectedModel;
+    if (availableModels && availableModels.length > 0) slot.availableModels = availableModels;
     slot.status = clean ? 'READY' : 'UNSET';
     slot.cooldownUntil = null;
     slot.lastError = null;
+    this.emit();
+  }
+
+  public clearAllKeys(): void {
+    this.slots = makeDefaultSlots();
     this.emit();
   }
 
@@ -146,7 +161,6 @@ export class FiveKeyPool {
   public getCaliKey(): KeySlotState | null {
     const cali = this.slots.KEY_CALI;
     if (cali.apiKey && cali.status !== 'INVALID' && cali.status !== 'COOLDOWN') return cali;
-    // Fallback to any ready worker key if KEY_CALI is unset
     for (const id of this.workerOrder) {
       if (this.slots[id].apiKey && this.slots[id].status === 'READY') return this.slots[id];
     }
@@ -245,33 +259,62 @@ export class FiveKeyPool {
     };
   }
 
-  public async testKeyHealth(id: KeySlotId): Promise<{ ok: boolean; status: number; detail: string }> {
+  /**
+   * Native AQ.xxxx & AIza... model auto-detection using x-goog-api-key header ONLY.
+   * Never sends Authorization: Bearer alongside x-goog-api-key (prevents 400/401 on AQ. keys).
+   */
+  public async detectModelsForRawKey(rawKey: string): Promise<{ ok: boolean; models: string[]; status: number; detail: string }> {
+    const clean = rawKey.trim();
+    if (!clean) return { ok: false, models: [], status: 0, detail: 'Empty key' };
+    try {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100', {
+        method: 'GET',
+        headers: { 'x-goog-api-key': clean }
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        return { ok: false, models: [], status: res.status, detail: txt.slice(0, 120) || `HTTP ${res.status}` };
+      }
+      const data = (await res.json()) as {
+        models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+      };
+      const models = (data.models || [])
+        .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+        .map((m) => String(m.name || '').replace(/^models\//, ''))
+        .filter((name) => name.includes('gemini'));
+      const sorted = Array.from(new Set(models)).sort((a, b) => {
+        const rank = (s: string) =>
+          s.includes('3.1-flash-lite') ? 0 : s.includes('flash-lite') ? 1 : s.includes('flash') ? 2 : 3;
+        return rank(a) - rank(b) || b.localeCompare(a);
+      });
+      return {
+        ok: true,
+        models: sorted.length > 0 ? sorted : [DEFAULT_GEMINI_MODEL],
+        status: res.status,
+        detail: `Detected ${sorted.length} Gemini models`
+      };
+    } catch (err) {
+      return { ok: false, models: [], status: 503, detail: (err as Error).message || 'Network error' };
+    }
+  }
+
+  public async testKeyHealth(id: KeySlotId): Promise<{ ok: boolean; status: number; detail: string; models?: string[] }> {
     const slot = this.slots[id];
     if (!slot.apiKey) return { ok: false, status: 0, detail: 'Unset' };
-    try {
-      const isAq = slot.apiKey.startsWith('AQ.');
-      const url = isAq
-        ? 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite?fields=name'
-        : `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(slot.apiKey)}`;
-      const headers: Record<string, string> = isAq
-        ? { Authorization: `Bearer ${slot.apiKey}`, 'x-goog-api-key': slot.apiKey }
-        : {};
-      const res = await fetch(url, { method: 'GET', headers });
-      if (res.ok) {
-        slot.status = 'READY';
-        slot.lastError = null;
-        slot.cooldownUntil = null;
-        this.emit();
-        return { ok: true, status: res.status, detail: 'Healthy' };
+    const result = await this.detectModelsForRawKey(slot.apiKey);
+    if (result.ok) {
+      slot.status = 'READY';
+      slot.lastError = null;
+      slot.cooldownUntil = null;
+      slot.availableModels = result.models;
+      if (!result.models.includes(slot.selectedModel)) {
+        slot.selectedModel = result.models[0] || DEFAULT_GEMINI_MODEL;
       }
-      const txt = await res.text().catch(() => '');
-      this.recordFailure(id, res.status, txt || `HTTP ${res.status}`);
-      return { ok: false, status: res.status, detail: `HTTP ${res.status}` };
-    } catch (err) {
-      const msg = (err as Error).message || 'Network error';
-      this.recordFailure(id, 503, msg);
-      return { ok: false, status: 503, detail: msg };
+      this.emit();
+      return { ok: true, status: result.status, detail: result.detail, models: result.models };
     }
+    this.recordFailure(id, result.status, result.detail);
+    return { ok: false, status: result.status, detail: result.detail };
   }
 
   public startWatchdog(onRecover: (keyId: KeySlotId) => void): void {

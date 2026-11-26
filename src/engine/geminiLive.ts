@@ -13,22 +13,37 @@ export class GeminiLiveClient {
   private micStream: MediaStream | null = null;
   private processor: ScriptProcessorNode | null = null;
   private nextPlayTime = 0;
+  private muted = false;
 
-  public async connect(systemInstruction: string, cb: LiveCallbacks): Promise<void> {
+  public setMuted(muted: boolean): void {
+    this.muted = muted;
+    if (this.micStream) {
+      this.micStream.getAudioTracks().forEach((track) => {
+        track.enabled = !muted;
+      });
+    }
+  }
+
+  public isMuted(): boolean {
+    return this.muted;
+  }
+
+  public async connect(systemInstruction: string, cb: LiveCallbacks, startMuted = false): Promise<void> {
     const slot = keyPool.getCaliKey();
     if (!slot) {
-      cb.onStatus('error', 'Configure KEY_CALI in the 5-Key Vault to use Gemini Live.');
+      cb.onStatus('error', 'Configure KEY_CALI in Settings and tap Save to use Gemini Live.');
       return;
     }
 
+    this.muted = startMuted;
     cb.onStatus('connecting', `Connecting with ${slot.id}...`);
 
     try {
       this.micStream = await navigator.mediaDevices.getUserMedia({
         audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
       });
+      this.setMuted(startMuted);
 
-      // Split AudioContexts: 16kHz capture vs 24kHz playback (prevents pitch distortion)
       this.captureCtx = new AudioContext({ sampleRate: 16000 });
       this.playbackCtx = new AudioContext({ sampleRate: 24000 });
       this.nextPlayTime = this.playbackCtx.currentTime;
@@ -50,7 +65,7 @@ export class GeminiLiveClient {
           }
         };
         this.ws?.send(JSON.stringify(setupMsg));
-        cb.onStatus('connected', 'Live voice active • Speak naturally');
+        cb.onStatus('connected', this.muted ? 'Connected • Mic Muted (Tap to Speak)' : 'Live voice active • Mic Open');
         this.startMicStreaming();
       };
 
@@ -102,7 +117,7 @@ export class GeminiLiveClient {
     const source = this.captureCtx.createMediaStreamSource(this.micStream);
     this.processor = this.captureCtx.createScriptProcessor(4096, 1, 1);
     this.processor.onaudioprocess = (e) => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      if (this.muted || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       const input = e.inputBuffer.getChannelData(0);
       const pcm16 = new Int16Array(input.length);
       for (let i = 0; i < input.length; i++) {

@@ -39,7 +39,6 @@ export async function runCaliTurn(params: {
 }): Promise<CaliTurnResult> {
   const caliSlot = keyPool.getCaliKey();
 
-  // Offline / Unset key smart fallback so Onboarding & Commands still work smoothly
   if (!caliSlot) {
     if (!params.profile.onboarding_complete) {
       const step = params.profile.onboarding_step;
@@ -67,7 +66,7 @@ export async function runCaliTurn(params: {
         });
         return {
           message:
-            "All locked in. I've briefed the floor on your taste and autonomy rules. Add your API keys in Settings—or hit Demo Sprint on the dashboard to watch the 13 pixel agents in action right now.",
+            "All locked in. I've briefed the floor on your taste and autonomy rules. Add your API keys in Settings (and tap Save) to start building your first blueprint.",
           speech: null,
           memory_ops: ops,
           agency_command: 'NONE'
@@ -89,8 +88,7 @@ export async function runCaliTurn(params: {
       return { message: 'Resuming the agency floor.', speech: null, memory_ops: [], agency_command: 'RESUME_LOOP' };
     }
     return {
-      message:
-        'Add your dedicated KEY_CALI in the 5-Key Vault (top-right sliders) for live Gemini reasoning, or tap Demo Sprint to test the full 13-agent floor offline.',
+      message: 'Add your dedicated KEY_CALI in Settings and tap Save Settings for live Gemini reasoning.',
       speech: null,
       memory_ops: [],
       agency_command: 'NONE'

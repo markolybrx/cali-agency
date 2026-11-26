@@ -40,15 +40,15 @@ export const MiniOfficePreview: React.FC<MiniOfficeProps> = ({ agentsRef, packet
     <button
       type="button"
       onClick={onOpenFull}
-      className="w-full overflow-hidden rounded-2xl border border-current/15 relative group cursor-pointer block"
+      className="w-full overflow-hidden rounded-2xl border border-current/15 relative group cursor-pointer block bg-[#3D2716]"
     >
       <canvas
         ref={canvasRef}
         width={OFFICE_WIDTH}
         height={OFFICE_HEIGHT}
-        className="w-full h-36 object-cover pixel-art block"
+        className="w-full h-60 sm:h-64 object-cover pixel-art block"
       />
-      <span className="absolute bottom-2 right-2 px-2.5 py-1 rounded-full bg-black/75 text-white text-[10px] font-semibold backdrop-blur">
+      <span className="absolute bottom-2.5 right-2.5 px-3 py-1 rounded-full bg-black/75 text-white text-[10px] font-semibold backdrop-blur">
         Expand Full Office
       </span>
     </button>
@@ -64,7 +64,6 @@ interface OfficeDrawerProps {
   agentsRef: React.MutableRefObject<PixelSpriteAgent[]>;
   packetsRef: React.MutableRefObject<PacketFlight[]>;
   onTriggerDemoHandoff: () => void;
-  onRunDemoSprint: () => void;
   onOpenTelemetry: () => void;
 }
 
@@ -77,7 +76,6 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
   agentsRef,
   packetsRef,
   onTriggerDemoHandoff,
-  onRunDemoSprint,
   onOpenTelemetry
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -114,7 +112,6 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
 
   return (
     <div className={`absolute inset-0 z-30 flex flex-col backdrop-blur-2xl ${t.overlay}`}>
-      {/* Header */}
       <div className="px-4 py-3.5 border-b border-current/10 flex items-center justify-between gap-2 shrink-0">
         <div>
           <h3 className="text-base font-semibold leading-none">Cali AI Office</h3>
@@ -141,7 +138,6 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
         </div>
       </div>
 
-      {/* Top Sticky API Limit & Token/RPM/RPD/Context HUD */}
       <div className="px-4 py-2.5 border-b border-current/10 space-y-2 shrink-0">
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
           {keys.map((k) => {
@@ -165,9 +161,7 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
                 <span>{k.id === 'KEY_CALI' ? 'CALI' : k.id}</span>
-                <span className="opacity-65">
-                  {cd > 0 ? `${cd}s` : `${k.rpmTimestamps.length}rpm`}
-                </span>
+                <span className="opacity-65">{cd > 0 ? `${cd}s` : `${k.rpmTimestamps.length}rpm`}</span>
               </button>
             );
           })}
@@ -180,8 +174,7 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
         </div>
       </div>
 
-      {/* Main Office View */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 pb-24 space-y-3">
         {viewMode === 'canvas' ? (
           <div className="rounded-2xl overflow-hidden border border-current/15 shadow-xl bg-[#3D2716]">
             <canvas
@@ -224,25 +217,14 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
           </div>
         )}
 
-        {/* Quick Actions */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onTriggerDemoHandoff}
-            className={`flex-1 py-2 rounded-full text-xs font-medium border cursor-pointer ${t.secondaryBtn}`}
-          >
-            Simulate Handoff
-          </button>
-          <button
-            type="button"
-            onClick={onRunDemoSprint}
-            className={`flex-1 py-2 rounded-full text-xs font-semibold cursor-pointer ${t.primaryBtn}`}
-          >
-            Run Demo Sprint
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onTriggerDemoHandoff}
+          className={`w-full py-2.5 rounded-full text-xs font-medium border cursor-pointer ${t.secondaryBtn}`}
+        >
+          Test Packet Handoff Animation
+        </button>
 
-        {/* Selected Agent Inspector Card */}
         {selectedAgent && (
           <div className={`rounded-2xl border p-3.5 space-y-1.5 ${t.accentCard}`}>
             <div className="flex items-center justify-between">

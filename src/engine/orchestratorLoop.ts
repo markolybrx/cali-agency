@@ -10,6 +10,9 @@ import type {
 import { assembleWorkerSystemPrompt, getPromptByRole } from '../prompts/agencyPrompts';
 import { callGeminiJson } from './geminiClient';
 import { keyPool } from './keyPool';
+import { runStaticPreCheck } from './staticPreCheck';
+import { buildCompactProjectContext } from './contextCompactor';
+import { acquireScreenWakeLock, releaseScreenWakeLock, sendAgencyNotification } from './deviceRuntime';
 
 export interface LoopHooks {
   onProjectUpdate: (project: ProjectState) => void;
@@ -34,7 +37,6 @@ interface WorkerResponse {
 export class AgencyOrchestratorLoop {
   private running = false;
   private paused = false;
-  private demoTimer: number | null = null;
   private hooks: LoopHooks;
 
   constructor(hooks: LoopHooks) {
@@ -48,10 +50,7 @@ export class AgencyOrchestratorLoop {
   public pause(): void {
     this.paused = true;
     this.running = false;
-    if (this.demoTimer !== null) {
-      clearTimeout(this.demoTimer);
-      this.demoTimer = null;
-    }
+    void releaseScreenWakeLock();
     this.hooks.onLoopStatus('PAUSED');
     this.hooks.onActivity({ agentId: 'cali', text: 'Agency floor paused.', kind: 'warn' });
   }
@@ -61,7 +60,6 @@ export class AgencyOrchestratorLoop {
     const now = new Date().toISOString();
 
     if (!slot) {
-      // Offline deterministic intake parser so user can test immediately
       const titleMatch = blueprintMd.match(/^#\s+Project Blueprint:\s*(.+)$/m);
       const name = titleMatch ? titleMatch[1].trim() : 'New Agency PWA';
       const fallback: ProjectState = {
@@ -112,8 +110,7 @@ export class AgencyOrchestratorLoop {
             name: 'Phase 2: Data Layer & Core MVP',
             status: 'PENDING',
             checklist: [
-              { id: 'P2-C1', description: 'LocalStorage CRUD repository wired cleanly', verified: false },
-              { id: 'P2-C2', description: 'Interactive UI flows work completely offline', verified: false }
+              { id: 'P2-C1', description: 'LocalStorage CRUD repository wired cleanly', verified: false }
             ],
             tasks: [
               {
@@ -149,13 +146,14 @@ export class AgencyOrchestratorLoop {
         ],
         file_manifest: {},
         files: {},
+        snapshots: [],
         created_at: now,
         updated_at: now
       };
       this.hooks.onProjectUpdate(fallback);
       this.hooks.onActivity({
         agentId: 'master-orchestrator',
-        text: `Loaded "${name}" locally (add K1-K4 keys for live Gemini intake).`,
+        text: `Loaded "${name}" locally (configure K1-K4 keys & tap Save Settings for live Gemini intake).`,
         kind: 'info'
       });
       return fallback;
@@ -165,7 +163,7 @@ export class AgencyOrchestratorLoop {
     const orchPrompt = getPromptByRole('master-orchestrator');
     const res = await callGeminiJson<{
       reasoning?: string;
-      updated_project_state: Omit<ProjectState, 'id' | 'blueprint_md' | 'files' | 'created_at' | 'updated_at'>;
+      updated_project_state: Omit<ProjectState, 'id' | 'blueprint_md' | 'files' | 'snapshots' | 'created_at' | 'updated_at'>;
     }>({
       keyId: slot.id,
       systemPrompt: orchPrompt.content,
@@ -193,6 +191,7 @@ export class AgencyOrchestratorLoop {
       phases: res.data.updated_project_state?.phases || [],
       file_manifest: res.data.updated_project_state?.file_manifest || {},
       files: {},
+      snapshots: [],
       created_at: now,
       updated_at: now
     };
@@ -213,12 +212,21 @@ export class AgencyOrchestratorLoop {
     this.running = true;
     this.paused = false;
     this.hooks.onLoopStatus('RUNNING');
+    void acquireScreenWakeLock();
+
     let project = structuredClone(initialProject);
+    if (!Array.isArray(project.snapshots)) project.snapshots = [];
 
     while (this.running && !this.paused) {
       const phase = project.phases.find((p) => p.phase_id === project.current_phase_id);
       if (!phase) {
-        this.hooks.onActivity({ agentId: 'cali', text: `Project "${project.project_name}" complete! Ready to export or ship.`, kind: 'success' });
+        this.hooks.onActivity({
+          agentId: 'cali',
+          text: `Project "${project.project_name}" complete! Ready to preview, export, or ship.`,
+          kind: 'success'
+        });
+        void sendAgencyNotification('Cali Agency Complete', `${project.project_name} finished all phases and is ready to ship.`);
+        void releaseScreenWakeLock();
         this.running = false;
         this.hooks.onLoopStatus('IDLE');
         return;
@@ -226,7 +234,6 @@ export class AgencyOrchestratorLoop {
 
       const nextTask = phase.tasks.find((t) => t.status === 'PENDING' || t.status === 'CODED');
       if (!nextTask) {
-        // Phase-end QA Tester -> Phase Gate
         const qaOk = await this.runPhaseQaAndGate(project, phase);
         if (!qaOk) return;
         project = { ...project, updated_at: new Date().toISOString() };
@@ -250,10 +257,8 @@ export class AgencyOrchestratorLoop {
         });
 
         const { systemPrompt, thinkingLevel } = assembleWorkerSystemPrompt(nextTask.assigned_agent);
-        const contextFiles: Record<string, string> = {};
-        for (const f of nextTask.target_files) {
-          if (project.files[f]) contextFiles[f] = project.files[f];
-        }
+        // Rolling Context Compactor: full target files + lightweight symbol index of rest of repo
+        const compactCtx = buildCompactProjectContext(project, nextTask.target_files);
 
         const workerRes = await callGeminiJson<WorkerResponse>({
           keyId: key.id,
@@ -262,8 +267,9 @@ export class AgencyOrchestratorLoop {
           userPayload: JSON.stringify({
             tech_stack: project.tech_stack,
             task: nextTask,
-            existing_files: contextFiles,
-            file_manifest: project.file_manifest
+            existing_files: compactCtx.target_contents,
+            repo_symbol_index: compactCtx.symbol_index,
+            recent_handoffs: compactCtx.recent_handoffs
           })
         });
 
@@ -273,7 +279,6 @@ export class AgencyOrchestratorLoop {
           continue;
         }
 
-        // Write returned files
         for (const f of out.files || []) {
           if (f.action === 'DELETE') delete project.files[f.path];
           else if (typeof f.content === 'string') {
@@ -286,6 +291,21 @@ export class AgencyOrchestratorLoop {
         nextTask.status = 'CODED';
         this.hooks.onAgentVisual(nextTask.assigned_agent, 'IDLE');
         this.hooks.onProjectUpdate({ ...project, updated_at: new Date().toISOString() });
+
+        // ZERO-API STATIC PRE-CHECK GATE (saves high-thinking Reviewer quota on syntax/JSON errors)
+        const preCheck = runStaticPreCheck(out.files || []);
+        if (!preCheck.passed) {
+          this.hooks.onActivity({
+            agentId: 'precheck',
+            text: `Static Pre-Check caught ${preCheck.issues.length} issue(s) -> routing straight to 09. Debugger.`,
+            kind: 'warn'
+          });
+          this.hooks.onHandoff(nextTask.assigned_agent, 'debugger', 'Static Pre-Check fail');
+          await this.runDebuggerPatch(project, nextTask, preCheck.issues);
+          project.updated_at = new Date().toISOString();
+          this.hooks.onProjectUpdate({ ...project });
+          continue;
+        }
 
         // Route to 07-code-reviewer
         this.hooks.onHandoff(nextTask.assigned_agent, 'code-reviewer', `${nextTask.task_id} diff`);
@@ -315,18 +335,19 @@ export class AgencyOrchestratorLoop {
           nextTask.blockers = revRes.data.blockers;
           if (nextTask.retry_count >= 3) {
             this.hooks.onAgentVisual('code-reviewer', 'BLOCKED', 'Circuit breaker hit');
+            const detail = `Reviewer flagged blockers 3 times: ${revRes.data.blockers?.join(' | ')}`;
             this.hooks.onPendingDecision({
               kind: 'CIRCUIT_BREAKER',
               title: `Circuit Breaker on ${nextTask.task_id}`,
-              detail: `Reviewer flagged blockers 3 times: ${revRes.data.blockers?.join(' | ')}`,
+              detail,
               approveLabel: 'Skip & Mark Done',
               declineLabel: 'Keep Paused',
               payload: { taskId: nextTask.task_id }
             });
+            void sendAgencyNotification('Cali Needs Approval', `Circuit breaker on ${nextTask.task_id}.`);
             this.pause();
             return;
           }
-          // Hand off to 09-debugger
           this.hooks.onHandoff('code-reviewer', 'debugger', 'Critical blockers');
           await this.runDebuggerPatch(project, nextTask, revRes.data.blockers || []);
         } else {
@@ -399,7 +420,6 @@ export class AgencyOrchestratorLoop {
   }
 
   private async runPhaseQaAndGate(project: ProjectState, phase: ProjectState['phases'][number]): Promise<boolean> {
-    // 1. Invoke 08-qa-tester (WRITE_TESTS)
     const qaKey = keyPool.acquireWorkerKey('qa-tester');
     if (!qaKey) {
       this.enterWatchdog(project);
@@ -430,7 +450,17 @@ export class AgencyOrchestratorLoop {
       keyId: qaKey.id
     });
 
-    // 2. Advance phase & mark checklist verified
+    // Save Phase Snapshot for 1-Tap Rollback
+    project.snapshots.unshift({
+      id: `snap_p${phase.phase_id}_${Date.now().toString(36)}`,
+      phase_id: phase.phase_id,
+      phase_name: phase.name,
+      created_at: new Date().toISOString(),
+      file_count: Object.keys(project.files).length,
+      files: { ...project.files },
+      file_manifest: { ...project.file_manifest }
+    });
+
     phase.checklist = phase.checklist.map((c) => ({ ...c, verified: true }));
     phase.status = 'PASSED';
     const nextPhase = project.phases.find((p) => p.phase_id === phase.phase_id + 1);
@@ -439,7 +469,7 @@ export class AgencyOrchestratorLoop {
       project.current_phase_id = nextPhase.phase_id;
       this.hooks.onActivity({
         agentId: 'master-orchestrator',
-        text: `Phase ${phase.phase_id} passed! Advancing to ${nextPhase.name}.`,
+        text: `Phase ${phase.phase_id} snapshot saved! Advancing to ${nextPhase.name}.`,
         kind: 'success'
       });
     } else {
@@ -463,6 +493,7 @@ export class AgencyOrchestratorLoop {
         declineLabel: 'Keep Paused',
         payload: { taskId: task.task_id }
       });
+      void sendAgencyNotification('Cali Needs Approval', `${task.task_id} hit split limit.`);
       this.pause();
       return;
     }
@@ -505,147 +536,8 @@ export class AgencyOrchestratorLoop {
         kind: 'success',
         keyId: recoveredKey
       });
+      void sendAgencyNotification('Cali Watchdog Recovered', `${recoveredKey} is back online. Production resumed.`);
       this.runLoop(project);
     });
-  }
-
-  // Zero-Quota Demo Sprint Mode: creates a real previewable PWA + animates the whole office!
-  public runDemoSprint(onComplete?: () => void): void {
-    this.pause();
-    this.running = true;
-    this.hooks.onLoopStatus('DEMO');
-    const now = new Date().toISOString();
-
-    const demoProject: ProjectState = {
-      id: `demo_${Date.now().toString(36)}`,
-      project_name: 'HabitFlow PWA (Demo)',
-      blueprint_md: '# Project Blueprint: HabitFlow PWA (Demo Sprint)\nZero-quota live agency simulation.',
-      current_phase_id: 1,
-      tech_stack: {
-        framework: 'Vanilla HTML/CSS/JS',
-        language: 'JavaScript',
-        styling: 'Vanilla CSS',
-        storage_or_backend: 'LocalStorage',
-        testing_tool: 'Node Test Runner',
-        deployment_target: 'Vercel'
-      },
-      phases: [
-        {
-          phase_id: 1,
-          name: 'Phase 1: Design & PWA Shell',
-          status: 'IN_PROGRESS',
-          checklist: [
-            { id: 'P1-C1', description: 'Design tokens & Poppins palette locked', verified: false },
-            { id: 'P1-C2', description: 'Standalone interactive index.html + manifest', verified: false }
-          ],
-          tasks: [
-            { task_id: 'P1-T1', title: 'Craft design tokens & palette', assigned_agent: 'ui-designer', target_files: ['styles.css'], status: 'PENDING', retry_count: 0, split_depth: 0 },
-            { task_id: 'P1-T2', title: 'Build interactive HabitFlow PWA', assigned_agent: 'frontend-developer', target_files: ['index.html'], status: 'PENDING', retry_count: 0, split_depth: 0 },
-            { task_id: 'P1-T3', title: 'Audit diff & verify offline rules', assigned_agent: 'code-reviewer', target_files: ['index.html'], status: 'PENDING', retry_count: 0, split_depth: 0 }
-          ]
-        }
-      ],
-      file_manifest: {},
-      files: {},
-      created_at: now,
-      updated_at: now
-    };
-
-    this.hooks.onProjectUpdate(demoProject);
-
-    const steps: Array<() => void> = [
-      () => {
-        this.hooks.onHandoff('cali', 'master-orchestrator', 'Approved Blueprint');
-        this.hooks.onAgentVisual('master-orchestrator', 'THINKING', 'Locking Vanilla PWA stack...');
-        this.hooks.onActivity({ agentId: 'master-orchestrator', text: 'Demo INTAKE locked HabitFlow PWA.', kind: 'info' });
-      },
-      () => {
-        this.hooks.onAgentVisual('master-orchestrator', 'IDLE');
-        this.hooks.onHandoff('master-orchestrator', 'ui-designer', 'P1-T1 Tokens');
-        this.hooks.onAgentVisual('ui-designer', 'CODING', 'Crafting #6C4CD1 violet tokens...');
-        demoProject.files['styles.css'] = ':root { --bg: #121215; --card: #18181D; --accent: #6C4CD1; --text: #F4F4F5; }';
-        demoProject.file_manifest['styles.css'] = 'Core Monolith violet design tokens';
-        demoProject.phases[0].tasks[0].status = 'DONE';
-        demoProject.phases[0].checklist[0].verified = true;
-        this.hooks.onProjectUpdate({ ...demoProject });
-        this.hooks.onActivity({ agentId: 'ui-designer', text: 'Delivered styles.css tokens.', kind: 'success' });
-      },
-      () => {
-        this.hooks.onAgentVisual('ui-designer', 'IDLE');
-        this.hooks.onHandoff('ui-designer', 'frontend-developer', 'styles.css');
-        this.hooks.onAgentVisual('frontend-developer', 'CODING', 'Building interactive HabitFlow PWA...');
-        demoProject.files['index.html'] = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>HabitFlow PWA</title>
-<style>
-  body { margin:0; font-family: system-ui, sans-serif; background:#121215; color:#F4F4F5; padding:20px; }
-  .card { background:#18181D; border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:16px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
-  button { background:#6C4CD1; color:#fff; border:none; border-radius:999px; padding:8px 14px; font-weight:600; cursor:pointer; }
-  .done { opacity:.5; text-decoration:line-through; }
-</style>
-</head>
-<body>
-  <h2 style="margin:0 0 4px">HabitFlow PWA</h2>
-  <p style="margin:0 0 16px;font-size:12px;color:#A1A1AA">Built by Cali's 13-Agent Demo Sprint</p>
-  <div id="list"></div>
-  <script>
-    const habits = [
-      { id: 1, name: 'Ship 1 mobile build', streak: 5, done: false },
-      { id: 2, name: '30m deep focus session', streak: 12, done: true },
-      { id: 3, name: 'Drink 2L water', streak: 3, done: false }
-    ];
-    function render() {
-      document.getElementById('list').innerHTML = habits.map(h =>
-        '<div class="card"><div class="'+(h.done?'done':'')+'"><b>'+h.name+'</b><div style="font-size:11px;color:#FFB732">'+h.streak+' day streak</div></div><button onclick="toggle('+h.id+')">'+(h.done?'Undo':'Done')+'</button></div>'
-      ).join('');
-    }
-    window.toggle = (id) => { const h = habits.find(x => x.id === id); h.done = !h.done; h.streak += h.done ? 1 : -1; render(); };
-    render();
-  </script>
-</body>
-</html>`;
-        demoProject.file_manifest['index.html'] = 'Interactive offline HabitFlow PWA';
-        demoProject.phases[0].tasks[1].status = 'DONE';
-        demoProject.phases[0].checklist[1].verified = true;
-        this.hooks.onProjectUpdate({ ...demoProject });
-        this.hooks.onActivity({ agentId: 'frontend-developer', text: 'Built index.html — ready for Preview!', kind: 'success' });
-      },
-      () => {
-        this.hooks.onAgentVisual('frontend-developer', 'IDLE');
-        this.hooks.onHandoff('frontend-developer', 'code-reviewer', 'index.html diff');
-        this.hooks.onAgentVisual('code-reviewer', 'REVIEWING', 'Zero critical bugs found.');
-        keyPool.simulateCooldown('K1', 8);
-        this.hooks.onActivity({ agentId: 'watchdog', text: 'Simulated 429 on K1 -> rotated to K2 cleanly.', kind: 'warn', keyId: 'K1' });
-      },
-      () => {
-        this.hooks.onAgentVisual('code-reviewer', 'IDLE');
-        this.hooks.onHandoff('code-reviewer', 'qa-tester', 'Approved build');
-        this.hooks.onAgentVisual('qa-tester', 'THINKING', 'All 3 offline assertions passed!');
-        demoProject.phases[0].tasks[2].status = 'DONE';
-        demoProject.phases[0].status = 'PASSED';
-        this.hooks.onProjectUpdate({ ...demoProject });
-      },
-      () => {
-        this.hooks.onAgentVisual('qa-tester', 'IDLE');
-        this.hooks.onHandoff('qa-tester', 'cali', 'Sprint Complete');
-        this.hooks.onAgentVisual('cali', 'TALKING', 'HabitFlow PWA is ready to preview or export!');
-        this.hooks.onActivity({ agentId: 'cali', text: 'Demo Sprint complete! Open Workspace -> Live Preview to test it.', kind: 'success' });
-        this.running = false;
-        this.hooks.onLoopStatus('IDLE');
-        onComplete?.();
-      }
-    ];
-
-    let idx = 0;
-    const runNext = () => {
-      if (!this.running || idx >= steps.length) return;
-      steps[idx++]();
-      if (idx < steps.length) {
-        this.demoTimer = window.setTimeout(runNext, 2600);
-      }
-    };
-    runNext();
   }
 }

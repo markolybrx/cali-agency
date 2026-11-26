@@ -11,6 +11,8 @@ export interface KeySlotState {
   label: string;
   role: 'cali' | 'worker';
   apiKey: string;
+  selectedModel: string;
+  availableModels: string[];
   status: KeyStatus;
   cooldownUntil: number | null;
   backoffMs: number;
@@ -79,6 +81,16 @@ export interface AgencyPhase {
   tasks: AgencyTask[];
 }
 
+export interface PhaseSnapshot {
+  id: string;
+  phase_id: number;
+  phase_name: string;
+  created_at: string;
+  file_count: number;
+  files: Record<string, string>;
+  file_manifest: Record<string, string>;
+}
+
 export interface TechStack {
   framework: string;
   language: string;
@@ -97,6 +109,7 @@ export interface ProjectState {
   phases: AgencyPhase[];
   file_manifest: Record<string, string>;
   files: Record<string, string>;
+  snapshots: PhaseSnapshot[];
   created_at: string;
   updated_at: string;
 }
@@ -126,7 +139,7 @@ export interface PendingDecision {
 export interface ActivityEvent {
   id: string;
   ts: string;
-  agentId: WorkerAgentId | 'cali' | 'watchdog';
+  agentId: WorkerAgentId | 'cali' | 'watchdog' | 'precheck';
   text: string;
   kind: 'info' | 'handoff' | 'warn' | 'success' | 'error';
   keyId?: KeySlotId;
