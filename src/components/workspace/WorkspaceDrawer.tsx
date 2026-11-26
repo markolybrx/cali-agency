@@ -4,6 +4,7 @@ import type { ThemeTokens } from '../../theme/themes';
 import { type GitHubConfig, shipProjectToGitHub } from '../../engine/storage';
 import { generatePwaIconsAndManifest, saveZipLocally } from '../../engine/localSave';
 import type { ConfirmState } from '../common/ConfirmModal';
+import { SnapshotDiffModal } from './SnapshotDiffModal';
 
 interface WorkspaceDrawerProps {
   open: boolean;
@@ -34,6 +35,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   const [tab, setTab] = useState<'files' | 'preview' | 'snapshots'>('files');
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [shipping, setShipping] = useState(false);
+  const [diffSnapshot, setDiffSnapshot] = useState<PhaseSnapshot | null>(null);
 
   const fileList = useMemo(() => (project ? Object.keys(project.files) : []), [project]);
   const activePath = selectedFile && project?.files[selectedFile] ? selectedFile : fileList[0] || null;
@@ -246,27 +248,36 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
               </div>
             ) : (
               project.snapshots.map((snap) => (
-                <div key={snap.id} className={`rounded-2xl border p-3.5 flex items-center justify-between gap-3 ${t.surface}`}>
+                <div key={snap.id} className={`rounded-2xl border p-3.5 flex items-center justify-between gap-2 ${t.surface}`}>
                   <div className="min-w-0">
                     <div className="text-xs font-semibold truncate">{snap.phase_name}</div>
                     <div className="text-[10px] font-mono opacity-60">
                       {snap.file_count} files • {new Date(snap.created_at).toLocaleString()}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onRequestConfirm({
-                        title: `Roll back to Phase ${snap.phase_id}?`,
-                        message: `Replace current workspace files with the ${snap.file_count} files from "${snap.phase_name}"?`,
-                        confirmLabel: 'Roll Back Files',
-                        onConfirm: () => onRollbackSnapshot(snap)
-                      })
-                    }
-                    className="px-3 py-1.5 rounded-full text-[11px] font-semibold bg-rose-600/20 text-rose-400 border border-rose-500/40 hover:bg-rose-600 hover:text-white cursor-pointer shrink-0"
-                  >
-                    Rollback
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setDiffSnapshot(snap)}
+                      className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer ${t.secondaryBtn}`}
+                    >
+                      Diff
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onRequestConfirm({
+                          title: `Roll back to Phase ${snap.phase_id}?`,
+                          message: `Replace current workspace files with the ${snap.file_count} files from "${snap.phase_name}"?`,
+                          confirmLabel: 'Roll Back Files',
+                          onConfirm: () => onRollbackSnapshot(snap)
+                        })
+                      }
+                      className="px-3 py-1.5 rounded-full text-[11px] font-semibold bg-rose-600/20 text-rose-400 border border-rose-500/40 hover:bg-rose-600 hover:text-white cursor-pointer"
+                    >
+                      Rollback
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -296,6 +307,14 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
           </div>
         )}
       </div>
+
+      {/* Snapshot Diff Modal */}
+      <SnapshotDiffModal
+        snapshot={diffSnapshot}
+        currentFiles={project?.files || {}}
+        onClose={() => setDiffSnapshot(null)}
+        t={t}
+      />
     </div>
   );
 };

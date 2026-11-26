@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { KeySlotState, TelemetrySummary } from '../../types/agency';
 import type { ThemeTokens } from '../../theme/themes';
 import { keyPool } from '../../engine/keyPool';
+import { type DiagnosticCheck, runRcDiagnosticsSuite } from '../../engine/diagnostics';
 
 interface TelemetryDrawerProps {
   open: boolean;
@@ -19,6 +20,7 @@ export const TelemetryDrawer: React.FC<TelemetryDrawerProps> = ({
   onToast
 }) => {
   const [testing, setTesting] = useState(false);
+  const [diagResults, setDiagResults] = useState<DiagnosticCheck[]>([]);
 
   if (!open) return null;
 
@@ -34,11 +36,18 @@ export const TelemetryDrawer: React.FC<TelemetryDrawerProps> = ({
     onToast(`Health & model scan done: ${okCount} healthy keys`);
   };
 
+  const handleRunDiagnostics = () => {
+    const checks = runRcDiagnosticsSuite();
+    setDiagResults(checks);
+    const passed = checks.filter((c) => c.passed).length;
+    onToast(`RC Diagnostics: ${passed}/${checks.length} subsystems passed`);
+  };
+
   return (
     <div className={`absolute inset-0 z-20 flex flex-col backdrop-blur-2xl p-4 ${t.overlay}`}>
       <div className="pb-3 border-b border-current/10 shrink-0">
-        <h3 className="text-base font-semibold leading-none">Telemetry &amp; 5-Key Health</h3>
-        <p className="text-[11px] opacity-60 mt-1">Rolling 60s RPM • Daily RPD • Context Window</p>
+        <h3 className="text-base font-semibold leading-none">Telemetry &amp; RC Diagnostics</h3>
+        <p className="text-[11px] opacity-60 mt-1">Rolling 60s RPM • Daily RPD • Context Window • Stress-Test</p>
       </div>
 
       <div className="flex-1 overflow-y-auto py-4 pb-28 space-y-4">
@@ -71,14 +80,44 @@ export const TelemetryDrawer: React.FC<TelemetryDrawerProps> = ({
           </div>
         </div>
 
-        <button
-          type="button"
-          disabled={testing}
-          onClick={handleTestAll}
-          className={`w-full py-2.5 rounded-full text-xs font-semibold cursor-pointer disabled:opacity-50 ${t.primaryBtn}`}
-        >
-          {testing ? 'Probing Keys & Detecting Models…' : 'Test All 5 Keys & Detect Models'}
-        </button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={testing}
+            onClick={handleTestAll}
+            className={`py-2.5 rounded-full text-xs font-semibold cursor-pointer disabled:opacity-50 ${t.primaryBtn}`}
+          >
+            {testing ? 'Probing 5 Keys…' : 'Test All 5 Keys & Models'}
+          </button>
+          <button
+            type="button"
+            onClick={handleRunDiagnostics}
+            className={`py-2.5 rounded-full text-xs font-semibold border cursor-pointer ${t.secondaryBtn}`}
+          >
+            Run RC Diagnostics Suite
+          </button>
+        </div>
+
+        {/* RC Diagnostics Results */}
+        {diagResults.length > 0 && (
+          <div className={`rounded-2xl border p-3.5 space-y-2.5 ${t.accentCard}`}>
+            <div className="text-[10px] font-mono uppercase tracking-widest text-accent">
+              RC Engine Verification ({diagResults.filter((c) => c.passed).length}/{diagResults.length} Passed)
+            </div>
+            {diagResults.map((c) => (
+              <div key={c.id} className="flex items-start justify-between gap-2 text-xs border-t border-current/10 pt-2">
+                <div className="min-w-0">
+                  <div className="font-semibold flex items-center gap-1.5">
+                    <span className={c.passed ? 'text-emerald-400' : 'text-rose-400'}>{c.passed ? 'PASS' : 'FAIL'}</span>
+                    <span>{c.name}</span>
+                  </div>
+                  <div className="text-[10px] opacity-75 mt-0.5">{c.detail}</div>
+                </div>
+                <span className="text-[10px] font-mono opacity-55 shrink-0">{c.durationMs}ms</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="space-y-2.5">
           {keys.map((k) => {

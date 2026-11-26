@@ -131,7 +131,9 @@ export default function App() {
   const [liveDetail, setLiveDetail] = useState('Tap Connect to start Gemini Live voice');
   const [liveMuted, setLiveMuted] = useState(false);
   const [liveTranscripts, setLiveTranscripts] = useState<string[]>([]);
+  const [liveToolLogs, setLiveToolLogs] = useState<string[]>([]);
   const liveClientRef = useRef<GeminiLiveClient | null>(null);
+  const liveStateRef = useRef({ activeProject: null as ProjectState | null, decisions: [] as PendingDecision[], loopStatus: 'IDLE', agentMetrics: {} as Record<string, AgentMetric> });
   const backupInputRef = useRef<HTMLInputElement | null>(null);
 
   const agentsRef = useRef<PixelSpriteAgent[]>(createInitialAgents());
@@ -141,6 +143,7 @@ export default function App() {
     () => projects.find((p) => p.id === activeProjectId) || projects[0] || null,
     [projects, activeProjectId]
   );
+  liveStateRef.current = { activeProject, decisions, loopStatus, agentMetrics };
 
   useEffect(() => {
     document.body.style.backgroundColor = t.bodyBg;
@@ -495,6 +498,56 @@ export default function App() {
         },
         onTranscript: (role, txt) => {
           setLiveTranscripts((prev) => [`${role === 'cali' ? 'Cali' : 'You'}: ${txt}`, ...prev.slice(0, 10)]);
+        },
+        onToolExecuted: (name, summary) => {
+          setLiveToolLogs((prev) => [`⚡ ${name}: ${summary}`, ...prev.slice(0, 5)]);
+        },
+        onToolCall: async (name, args) => {
+          const snap = liveStateRef.current;
+          if (name === 'get_agency_status') {
+            const kStatus = keyPool.getAll().map((k) => `${k.id}:${k.status}`).join(', ');
+            const summary = snap.activeProject
+              ? `${snap.activeProject.project_name} Phase ${snap.activeProject.current_phase_id} (${snap.loopStatus})`
+              : `No active project (${snap.loopStatus})`;
+            return {
+              summary,
+              project: snap.activeProject?.project_name || null,
+              phase: snap.activeProject?.current_phase_id || 0,
+              loop_status: snap.loopStatus,
+              pending_decisions: snap.decisions.length,
+              keys: kStatus
+            };
+          }
+          if (name === 'get_agent_report') {
+            const aid = String(args.agent_id || '');
+            const m = snap.agentMetrics[aid];
+            return {
+              summary: m ? `${aid}: ${m.calls} calls, ${(m.lastLatencyMs / 1000).toFixed(1)}s` : `${aid}: idle`,
+              agent_id: aid,
+              metric: m || null
+            };
+          }
+          if (name === 'control_loop') {
+            const action = String(args.action || '').toLowerCase();
+            if (action === 'pause') {
+              orchestratorRef.current?.pause();
+              return { ok: true, summary: 'Production paused' };
+            }
+            if (action === 'resume' && snap.activeProject) {
+              void orchestratorRef.current?.runLoop(snap.activeProject);
+              return { ok: true, summary: 'Production resumed' };
+            }
+            return { ok: false, summary: 'No active project to resume' };
+          }
+          if (name === 'resolve_approval') {
+            const top = snap.decisions[0];
+            if (!top) return { ok: false, summary: 'No pending decisions' };
+            const approved = Boolean(args.approved);
+            setDecisions((prev) => prev.filter((d) => d.id !== top.id));
+            showToast(approved ? `Voice approved: ${top.title}` : `Voice declined: ${top.title}`);
+            return { ok: true, summary: approved ? `Approved ${top.title}` : `Declined ${top.title}` };
+          }
+          return { ok: false, summary: 'Unknown tool' };
         }
       },
       liveMuted
@@ -1376,6 +1429,15 @@ export default function App() {
                     <p className="text-xs opacity-65">{liveDetail}</p>
                   </div>
 
+                  {liveToolLogs.length > 0 && (
+                    <div className="flex flex-wrap justify-center gap-1.5 max-w-sm">
+                      {liveToolLogs.map((log, i) => (
+                        <span key={i} className={`px-2.5 py-1 rounded-full text-[10px] font-mono border ${t.accentCard}`}>
+                          {log}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {liveTranscripts.length > 0 && (
                     <div className={`w-full max-w-sm rounded-2xl border p-3 text-left text-[11px] space-y-1 max-h-28 overflow-y-auto ${t.surface}`}>
                       {liveTranscripts.map((line, i) => (

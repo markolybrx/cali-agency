@@ -4,7 +4,66 @@ export interface LiveCallbacks {
   onStatus: (status: 'connecting' | 'connected' | 'speaking' | 'closed' | 'error', detail?: string) => void;
   onTranscript: (role: 'user' | 'cali', text: string) => void;
   onToolCall?: (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  onToolExecuted?: (name: string, summary: string) => void;
 }
+
+const LIVE_TOOLS = [
+  {
+    functionDeclarations: [
+      {
+        name: 'get_agency_status',
+        description: 'Returns the active project name, current phase, loop status, pending decision count, and 5-key quota health.'
+      },
+      {
+        name: 'get_agent_report',
+        description: 'Returns latency, token spend, retry count, and last task for a specific coding agent.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            agent_id: {
+              type: 'STRING',
+              description: 'Agent role ID such as frontend-developer, code-reviewer, debugger, qa-tester, ui-designer, or master-orchestrator.'
+            }
+          },
+          required: ['agent_id']
+        }
+      },
+      {
+        name: 'control_loop',
+        description: 'Pauses or resumes the 13-agent autonomous production loop.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            action: {
+              type: 'STRING',
+              enum: ['pause', 'resume'],
+              description: 'Whether to pause or resume production.'
+            }
+          },
+          required: ['action']
+        }
+      },
+      {
+        name: 'resolve_approval',
+        description: 'Approves or declines the top pending decision staged by Cali.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            approved: {
+              type: 'BOOLEAN',
+              description: 'True to approve the pending decision, false to decline.'
+            },
+            note: {
+              type: 'STRING',
+              description: 'Optional short note explaining the decision.'
+            }
+          },
+          required: ['approved']
+        }
+      }
+    ]
+  }
+];
 
 export class GeminiLiveClient {
   private ws: WebSocket | null = null;
@@ -61,11 +120,12 @@ export class GeminiLiveClient {
               responseModalities: ['AUDIO'],
               speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } }
             },
-            systemInstruction: { parts: [{ text: systemInstruction }] }
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            tools: LIVE_TOOLS
           }
         };
         this.ws?.send(JSON.stringify(setupMsg));
-        cb.onStatus('connected', this.muted ? 'Connected • Mic Muted (Tap to Speak)' : 'Live voice active • Mic Open');
+        cb.onStatus('connected', this.muted ? 'Connected • Mic Muted (Tap to Speak)' : 'Live voice active • 4 Tools Armed');
         this.startMicStreaming();
       };
 
@@ -92,6 +152,7 @@ export class GeminiLiveClient {
             const responses = [];
             for (const fc of msg.toolCall.functionCalls) {
               const result = await cb.onToolCall(fc.name, fc.args || {});
+              cb.onToolExecuted?.(fc.name, String(result.summary || 'OK'));
               responses.push({ id: fc.id, name: fc.name, response: result });
             }
             this.ws?.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
