@@ -1,0 +1,79 @@
+name: Build Sideloadable Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Web Bundle
+        run: npm run build
+
+      - name: Add Android Platform (if missing)
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+
+      - name: Inject Android Permissions for Gemini Live & Watchdog
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          node -e '
+            const fs = require("fs");
+            const p = process.argv[1];
+            let xml = fs.readFileSync(p, "utf8");
+            const perms = [
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.RECORD_AUDIO",
+              "android.permission.MODIFY_AUDIO_SETTINGS",
+              "android.permission.WAKE_LOCK",
+              "android.permission.FOREGROUND_SERVICE"
+            ];
+            for (const perm of perms) {
+              if (!xml.includes(perm)) {
+                xml = xml.replace("<application", "    <uses-permission android:name=\"" + perm + "\" />\n    <application");
+              }
+            }
+            fs.writeFileSync(p, xml, "utf8");
+          ' "$MANIFEST"
+
+      - name: Sync Capacitor Assets
+        run: npx cap sync android
+
+      - name: Build Debug APK (Sideload Ready)
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload Sideloadable APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cali-pwa-agency-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

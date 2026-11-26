@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes calmBreathe {
+  0%, 100% { transform: scale(1); opacity: 0.38; }
+  50% { transform: scale(1.12); opacity: 0.72; }
+}
+@keyframes voiceWave {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
+}
+@keyframes ringHold {
+  from { stroke-dashoffset: 176; }
+  to { stroke-dashoffset: 0; }
+}
+.animate-breathe { animation: calmBreathe 4.2s ease-in-out infinite; }
+.voice-bar { animation: voiceWave 0.85s ease-in-out infinite; transform-origin: center; }
+.ring-holding { animation: ringHold 450ms linear forwards; }
+.text-accent { color: var(--text-accent, #FFB732); }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
