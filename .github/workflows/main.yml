@@ -58,7 +58,7 @@ jobs:
             const gradlePath = "android/app/build.gradle";
             let gradle = fs.readFileSync(gradlePath, "utf8");
             gradle = gradle.replace(/versionCode\s+\d+/, "versionCode " + process.env.APP_VERSION_CODE);
-            gradle = gradle.replace(/versionName\s+"[^"]+"/, "versionName "" + process.env.APP_VERSION + """);
+            gradle = gradle.replace(/versionName\s+"[^"]+"/, "versionName " + JSON.stringify(process.env.APP_VERSION));
             fs.writeFileSync(gradlePath, gradle, "utf8");
 
             const manifestPath = "android/app/src/main/AndroidManifest.xml";
