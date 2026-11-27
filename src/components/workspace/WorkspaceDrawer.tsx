@@ -57,14 +57,22 @@ function buildBundledPreviewHtml(project: ProjectState): string {
   });
 
   const errorHook = `<script>
-    window.onerror = function(msg, src, line) {
-      parent.postMessage({ type: 'PWA_PREVIEW_ERR', msg: msg + ' (line ' + line + ')' }, '*');
-    };
-    const origErr = console.error;
-    console.error = function(...args) {
-      parent.postMessage({ type: 'PWA_PREVIEW_ERR', msg: args.join(' ') }, '*');
-      origErr.apply(console, args);
-    };
+    (function() {
+      try {
+        var mockReg = { scope: "./", active: null, installing: null, waiting: null, update: function() { return Promise.resolve(); }, unregister: function() { return Promise.resolve(true); } };
+        var mockSw = { register: function() { return Promise.resolve(mockReg); }, getRegistration: function() { return Promise.resolve(mockReg); }, getRegistrations: function() { return Promise.resolve([mockReg]); }, ready: Promise.resolve(mockReg), controller: null, addEventListener: function() {}, removeEventListener: function() {} };
+        Object.defineProperty(navigator, "serviceWorker", { configurable: true, get: function() { return mockSw; } });
+      } catch (e) {}
+      window.onerror = function(msg, src, line) {
+        parent.postMessage({ type: "PWA_PREVIEW_ERR", msg: msg + " (line " + line + ")" }, "*");
+      };
+      var origErr = console.error;
+      console.error = function() {
+        var args = Array.prototype.slice.call(arguments);
+        parent.postMessage({ type: "PWA_PREVIEW_ERR", msg: args.join(" ") }, "*");
+        origErr.apply(console, args);
+      };
+    })();
   <\/script>`;
 
   return html.includes('<head>') ? html.replace('<head>', `<head>${errorHook}`) : `${errorHook}${html}`;
@@ -301,7 +309,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             {previewHtml ? (
               <iframe
                 title="Multi-File Live Preview"
-                sandbox="allow-scripts"
+                sandbox="allow-scripts allow-same-origin allow-forms"
                 srcDoc={previewHtml}
                 className="w-full h-[46vh] rounded-2xl border border-current/15 bg-white"
               />

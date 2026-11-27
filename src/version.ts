@@ -1,6 +1,6 @@
-export const APP_VERSION = '0.8.0';
+export const APP_VERSION = '0.8.1';
 export const APP_VERSION_TAG = `v${APP_VERSION}`;
-export const APP_VERSION_CODE = 800;
+export const APP_VERSION_CODE = 801;
 
 export interface ChangelogRelease {
   version: string;
@@ -10,6 +10,15 @@ export interface ChangelogRelease {
 }
 
 export const CHANGELOG: ChangelogRelease[] = [
+  {
+    version: 'v0.8.1',
+    date: '2026-11-27',
+    title: 'Live Preview ServiceWorker & Storage Sandbox Fix',
+    highlights: [
+      'Fixed SecurityError when previewing generated PWAs that access navigator.serviceWorker inside the Workspace Live Preview iframe.',
+      'Enabled allow-same-origin & allow-forms on Live Preview sandbox so IndexedDB and LocalStorage work cleanly during previews.'
+    ]
+  },
   {
     version: 'v0.8.0',
     date: '2026-11-27',
