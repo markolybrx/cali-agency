@@ -65,7 +65,7 @@ export function buildPhaseAccomplishmentReport(
     .join('\n');
   const fileLines = filesProduced
     .slice(0, 20)
-    .map((f) => `- `${f}` — ${project.file_manifest[f] || 'Saved to IndexedDB & Local Folder'}`)
+    .map((f) => '- ' + f + ' — ' + (project.file_manifest[f] || 'Saved to IndexedDB & Local Folder'))
     .join('\n');
   const nextLines = nextPhase
     ? nextPhase.tasks.map((t) => `- **${t.task_id}:** ${t.title} (${t.assigned_agent})`).join('\n')

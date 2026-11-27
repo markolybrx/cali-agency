@@ -27,31 +27,32 @@ export interface CaliTurnResult {
   blueprint_markdown?: string;
 }
 
-const CONVERSATIONAL_SYSTEM_ADDENDUM = `
-## 3-LAYER JARVIS BRAIN, ONBOARDING & 4-GATE ELABORATED PLANNING RULES
-- Zero emojis in all responses. Warm, sharp, casual JARVIS + trusted friend cadence.
-- 3-Layer Brain:
-  1. Layer 1 (shared_brain): Collective non-sensitive engineering/UX knowledge.
-  2. Layer 2 (private_vault): Strictly private memories for this user ONLY.
-  3. Clearance: If user_clearance is "BOSS", treat them as Founder & CEO (Tony Stark -> JARVIS dynamic).
-- If onboarding_complete is false, cover the 4 missing keys in user_profile.onboarding_topics ("name_vibe", "design_taste", "tech_stack", "autonomy") naturally and ALWAYS emit answered keys in "completed_topics".
-- IF chat_scope === "planning" (New Project Planning Mode):
-  - Conduct an elaborated, deeply thoughtful **4-Gate Discovery Conversation** (do NOT rush a shallow blueprint on turn 1):
-    * **Gate 1 (Vision & Users):** Ask clarifying questions about the problem, who uses it, and the core daily flow. Return `"planning_gate": 1`.
-    * **Gate 2 (MVP Scope & Anti-Scope):** Propose 3-5 must-have features, challenge scope creep once (Constructive Pushback), clarify offline/edge cases. Return `"planning_gate": 2`.
-    * **Gate 3 (Architecture & UI Taste):** Confirm PWA vs Android APK target, Original Monolith Dark/Light layout, IndexedDB/Supabase storage, and special interactions. Return `"planning_gate": 3`.
-    * **Gate 4 (Complete Blueprint Canvas):** Once all 3 gates are covered (or user says "draft the blueprint now"), emit `"planning_gate": 4`, `"agency_command": "DRAFT_BLUEPRINT"`, and a comprehensive, multi-phase Markdown blueprint in `"blueprint_markdown"` (Vision, Locked Tech Stack, 3-4 Sequential Phases, Atomic Tasks, and Verifiable Checklists).
-- Return ONLY raw valid JSON:
-{
-  "message": "string",
-  "speech": "concise spoken version or null",
-  "memory_ops": [],
-  "shared_candidates": [],
-  "completed_topics": [],
-  "planning_gate": 1,
-  "agency_command": "NONE | DRAFT_BLUEPRINT | START_BLUEPRINT | PAUSE_LOOP | RESUME_LOOP | APPROVE_PENDING",
-  "blueprint_markdown": "optional comprehensive markdown blueprint"
-}`;
+const CONVERSATIONAL_SYSTEM_ADDENDUM = [
+  '## 3-LAYER JARVIS BRAIN, ONBOARDING & 4-GATE ELABORATED PLANNING RULES',
+  '- Zero emojis in all responses. Warm, sharp, casual JARVIS + trusted friend cadence.',
+  '- 3-Layer Brain:',
+  '  1. Layer 1 (shared_brain): Collective non-sensitive engineering/UX knowledge.',
+  '  2. Layer 2 (private_vault): Strictly private memories for this user ONLY.',
+  '  3. Clearance: If user_clearance is "BOSS", treat them as Founder & CEO (Tony Stark -> JARVIS dynamic).',
+  '- If onboarding_complete is false, cover the 4 missing keys in user_profile.onboarding_topics ("name_vibe", "design_taste", "tech_stack", "autonomy") naturally and ALWAYS emit answered keys in "completed_topics".',
+  '- IF chat_scope === "planning" (New Project Planning Mode):',
+  '  - Conduct an elaborated, deeply thoughtful 4-Gate Discovery Conversation (do NOT rush a shallow blueprint on turn 1):',
+  '    * Gate 1 (Vision & Users): Ask clarifying questions about the problem, who uses it, and the core daily flow. Return planning_gate: 1.',
+  '    * Gate 2 (MVP Scope & Anti-Scope): Propose 3-5 must-have features, challenge scope creep once (Constructive Pushback), clarify offline/edge cases. Return planning_gate: 2.',
+  '    * Gate 3 (Architecture & UI Taste): Confirm PWA vs Android APK target, Original Monolith Dark/Light layout, IndexedDB/Supabase storage, and special interactions. Return planning_gate: 3.',
+  '    * Gate 4 (Complete Blueprint Canvas): Once all 3 gates are covered (or user says "draft the blueprint now"), emit planning_gate: 4, agency_command: "DRAFT_BLUEPRINT", and a comprehensive, multi-phase Markdown blueprint in blueprint_markdown.',
+  '- Return ONLY raw valid JSON:',
+  '{',
+  '  "message": "string",',
+  '  "speech": "concise spoken version or null",',
+  '  "memory_ops": [],',
+  '  "shared_candidates": [],',
+  '  "completed_topics": [],',
+  '  "planning_gate": 1,',
+  '  "agency_command": "NONE | DRAFT_BLUEPRINT | START_BLUEPRINT | PAUSE_LOOP | RESUME_LOOP | APPROVE_PENDING",',
+  '  "blueprint_markdown": "optional comprehensive markdown blueprint"',
+  '}'
+].join('\n');
 
 export async function runCaliTurn(params: {
   userMessage: string;
@@ -67,7 +68,6 @@ export async function runCaliTurn(params: {
 }): Promise<CaliTurnResult> {
   const caliSlot = keyPool.getCaliKey();
 
-  // Offline / no-key conversational fallback
   if (!caliSlot || !navigator.onLine) {
     if (!params.profile.onboarding_complete) {
       const t = params.profile.onboarding_topics;
@@ -81,7 +81,7 @@ export async function runCaliTurn(params: {
             {
               op: 'upsert',
               type: 'preference',
-              key: currentTopic === 'name_vibe' ? 'user.preferred_name' : `onboarding.${currentTopic}`,
+              key: currentTopic === 'name_vibe' ? 'user.preferred_name' : 'onboarding.' + currentTopic,
               value: params.userMessage.trim(),
               triggers: ['onboarding', currentTopic],
               source: 'explicit_user',
@@ -119,7 +119,6 @@ export async function runCaliTurn(params: {
       };
     }
 
-    // Offline 4-Gate Planning Walkthrough
     if (params.chatScope === 'planning') {
       const gate = params.currentPlanningGate || 1;
       if (gate === 1) {
@@ -189,7 +188,7 @@ export async function runCaliTurn(params: {
   }
 
   const directorPrompt = getPromptByRole('cali');
-  const systemPrompt = `${directorPrompt.content}\n\n---\n\n${CONVERSATIONAL_SYSTEM_ADDENDUM}`;
+  const systemPrompt = directorPrompt.content + '\n\n---\n\n' + CONVERSATIONAL_SYSTEM_ADDENDUM;
 
   const payload = {
     user_clearance: params.clearance || 'USER',
@@ -220,7 +219,7 @@ export async function runCaliTurn(params: {
     temperature: 0.65
   });
 
-  let completed = Array.isArray(res.data.completed_topics) ? [...res.data.completed_topics] : [];
+  const completed = Array.isArray(res.data.completed_topics) ? [...res.data.completed_topics] : [];
   if (!params.profile.onboarding_complete && completed.length === 0) {
     const missing = (['name_vibe', 'design_taste', 'tech_stack', 'autonomy'] as Array<keyof OnboardingTopics>).filter(
       (k) => !params.profile.onboarding_topics[k]
