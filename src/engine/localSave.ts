@@ -1,64 +1,24 @@
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import JSZip from 'jszip';
-import type { MemoryItem, ProjectState, PromptEntry, StorageDirectoryConfig, StorageRootId, UserProfile } from '../types/agency';
+import type { AgencyReport, MemoryItem, ProjectState, PromptEntry, UserProfile } from '../types/agency';
 import { APP_VERSION } from '../version';
 
-const STORAGE_DIR_KEY = 'cali_storage_dir_v060';
+const DIR_PREF_KEY = 'cali_agency_local_folder_v1';
 
-export function loadStorageConfig(): StorageDirectoryConfig {
-  try {
-    const raw = localStorage.getItem(STORAGE_DIR_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<StorageDirectoryConfig>;
-      return {
-        root: parsed.root || 'DOCUMENTS',
-        baseFolder: (parsed.baseFolder || 'CaliAgency').replace(/^\/+|\/+$/g, '') || 'CaliAgency',
-        configured: Boolean(parsed.configured)
-      };
-    }
-  } catch {
-    // ignore
-  }
-  return { root: 'DOCUMENTS', baseFolder: 'CaliAgency', configured: false };
+export function getLocalSaveFolder(): string {
+  const saved = localStorage.getItem(DIR_PREF_KEY);
+  const clean = (saved || 'CaliAgency').replace(/^\/+|\/+$/g, '');
+  return clean || 'CaliAgency';
 }
 
-export function saveStorageConfig(cfg: StorageDirectoryConfig): StorageDirectoryConfig {
-  const clean: StorageDirectoryConfig = {
-    root: cfg.root,
-    baseFolder: cfg.baseFolder.trim().replace(/^\/+|\/+$/g, '') || 'CaliAgency',
-    configured: true
-  };
-  localStorage.setItem(STORAGE_DIR_KEY, JSON.stringify(clean));
+export function setLocalSaveFolder(folder: string): string {
+  const clean = folder.trim().replace(/^\/+|\/+$/g, '') || 'CaliAgency';
+  localStorage.setItem(DIR_PREF_KEY, clean);
   return clean;
 }
 
-function mapRootDir(root: StorageRootId): Directory {
-  if (root === 'EXTERNAL') return Directory.ExternalStorage;
-  if (root === 'DATA') return Directory.Data;
-  return Directory.Documents;
-}
-
-export function getRootDisplayPrefix(root: StorageRootId): string {
-  if (root === 'EXTERNAL') return '/storage/emulated/0';
-  if (root === 'DATA') return 'AppData';
-  return 'Documents';
-}
-
-export function slugifyProject(name: string): string {
-  return (name || 'agency-project').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '') || 'agency-project';
-}
-
-export function getProjectLocalPath(projectName: string, cfg = loadStorageConfig()): string {
-  return `${getRootDisplayPrefix(cfg.root)}/${cfg.baseFolder}/Projects/${slugifyProject(projectName)}`;
-}
-
-export function getDirectoryTreeSummary(cfg = loadStorageConfig()): { projects: string; cache: string; backups: string } {
-  const prefix = `${getRootDisplayPrefix(cfg.root)}/${cfg.baseFolder}`;
-  return {
-    projects: `${prefix}/Projects`,
-    cache: `${prefix}/Cache`,
-    backups: `${prefix}/Backups`
-  };
+export function slugifyProjectName(name: string): string {
+  return (name || 'agency-project').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'agency-project';
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
@@ -72,95 +32,116 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-export async function initializeDirectoryTree(cfg: StorageDirectoryConfig): Promise<string> {
-  const dir = mapRootDir(cfg.root);
-  const subdirs = [`${cfg.baseFolder}/Projects`, `${cfg.baseFolder}/Cache`, `${cfg.baseFolder}/Backups`];
-  try {
-    for (const p of subdirs) {
-      await Filesystem.mkdir({ path: p, directory: dir, recursive: true }).catch(() => {});
-    }
-    return `Directory ready: ${getRootDisplayPrefix(cfg.root)}/${cfg.baseFolder}`;
-  } catch {
-    return `Configured path: ${getRootDisplayPrefix(cfg.root)}/${cfg.baseFolder} (Web browser download mode)`;
-  }
-}
-
-export async function saveTextLocally(
-  filename: string,
-  text: string,
-  subfolder: 'Backups' | 'Cache' | 'Projects' = 'Backups',
-  mime = 'application/json'
-): Promise<string> {
-  const cfg = loadStorageConfig();
-  const relPath = `${cfg.baseFolder}/${subfolder}/${filename}`;
+export async function saveTextLocally(filename: string, text: string, mime = 'application/json'): Promise<string> {
+  const baseFolder = getLocalSaveFolder();
+  const fullRelPath = `${baseFolder}/${filename.replace(/^\/+/, '')}`;
   try {
     await Filesystem.writeFile({
-      path: relPath,
+      path: fullRelPath,
       data: text,
-      directory: mapRootDir(cfg.root),
+      directory: Directory.Documents,
       encoding: Encoding.UTF8,
       recursive: true
     });
-    return `Saved to ${getRootDisplayPrefix(cfg.root)}/${relPath}`;
+    return `Saved to Documents/${fullRelPath}`;
   } catch {
-    triggerBrowserDownload(new Blob([text], { type: mime }), filename);
-    return `Downloaded ${filename}`;
+    triggerBrowserDownload(new Blob([text], { type: mime }), filename.split('/').pop() || filename);
+    return `Downloaded ${filename.split('/').pop() || filename}`;
   }
 }
 
-export async function syncProjectFolderLocally(project: ProjectState): Promise<string> {
-  const cfg = loadStorageConfig();
-  const slug = slugifyProject(project.project_name);
-  const base = `${cfg.baseFolder}/Projects/${slug}`;
-  const dir = mapRootDir(cfg.root);
-  const allFiles: Record<string, string> = {
-    'project-blueprint.md': project.blueprint_md || '# Project Blueprint',
-    'project_state.json': JSON.stringify({ ...project, files: undefined, snapshots: undefined }, null, 2),
-    ...project.files
-  };
-
+/**
+ * Live Write-Through: writes an individual generated artifact directly to
+ * Documents/<chosenFolder>/<project-slug>/<relPath> on Android.
+ */
+export async function writeProjectFileToLocalFolder(
+  projectName: string,
+  relPath: string,
+  content: string
+): Promise<{ ok: boolean; targetPath: string }> {
+  const baseFolder = getLocalSaveFolder();
+  const slug = slugifyProjectName(projectName);
+  const cleanRel = relPath.replace(/^\/+/, '');
+  const fullPath = `${baseFolder}/${slug}/${cleanRel}`;
   try {
-    let written = 0;
-    for (const [rel, content] of Object.entries(allFiles)) {
-      const cleanRel = rel.replace(/^\/+/, '');
-      await Filesystem.writeFile({
-        path: `${base}/${cleanRel}`,
-        data: content,
-        directory: dir,
-        encoding: Encoding.UTF8,
-        recursive: true
-      });
-      written += 1;
-    }
-    return `Synced ${written} files to ${getRootDisplayPrefix(cfg.root)}/${base}`;
+    await Filesystem.writeFile({
+      path: fullPath,
+      data: content,
+      directory: Directory.Documents,
+      encoding: Encoding.UTF8,
+      recursive: true
+    });
+    return { ok: true, targetPath: `Documents/${fullPath}` };
   } catch {
-    // Fallback on browser: save as ZIP
-    return saveZipLocally(project);
+    return { ok: false, targetPath: `Documents/${fullPath}` };
   }
+}
+
+export async function writeReportToLocalFolder(
+  projectName: string,
+  report: AgencyReport
+): Promise<{ ok: boolean; targetPath: string }> {
+  const safeId = report.id.replace(/[^a-zA-Z0-9_-]/g, '');
+  const md = `# ${report.title}\n\n- **Type:** ${report.badge}\n- **Author:** ${report.author}\n- **Date:** ${new Date(report.createdAt).toLocaleString()}\n\n${report.markdown}`;
+  return writeProjectFileToLocalFolder(projectName, `reports/${safeId}.md`, md);
+}
+
+export async function syncAllProjectFilesToLocalFolder(
+  project: ProjectState,
+  reports: AgencyReport[] = []
+): Promise<{ syncedFiles: number; syncedReports: number; folderPath: string; nativeOk: boolean }> {
+  const baseFolder = getLocalSaveFolder();
+  const slug = slugifyProjectName(project.project_name);
+  const folderPath = `Documents/${baseFolder}/${slug}/`;
+  let syncedFiles = 0;
+  let syncedReports = 0;
+  let nativeOk = false;
+
+  const entries: Array<[string, string]> = [
+    ['project-blueprint.md', project.blueprint_md || '# Project Blueprint'],
+    ...Object.entries(project.files || {})
+  ];
+
+  for (const [p, content] of entries) {
+    const res = await writeProjectFileToLocalFolder(project.project_name, p, content);
+    if (res.ok) {
+      nativeOk = true;
+      syncedFiles += 1;
+    }
+  }
+
+  for (const rep of reports) {
+    const res = await writeReportToLocalFolder(project.project_name, rep);
+    if (res.ok) {
+      nativeOk = true;
+      syncedReports += 1;
+    }
+  }
+
+  return { syncedFiles, syncedReports, folderPath, nativeOk };
 }
 
 export async function saveZipLocally(project: ProjectState): Promise<string> {
-  const cfg = loadStorageConfig();
   const zip = new JSZip();
-  const slug = slugifyProject(project.project_name);
-  const root = zip.folder(slug)!;
+  const folderName = slugifyProjectName(project.project_name);
+  const root = zip.folder(folderName)!;
   root.file('project-blueprint.md', project.blueprint_md || '# Blueprint');
   root.file('project_state.json', JSON.stringify({ ...project, files: undefined, snapshots: undefined }, null, 2));
   for (const [filePath, content] of Object.entries(project.files)) {
     root.file(filePath.replace(/^\/+/, ''), content);
   }
-  const filename = `${slug}.zip`;
-  const relPath = `${cfg.baseFolder}/Projects/${filename}`;
+  const filename = `${folderName}.zip`;
+  const baseFolder = getLocalSaveFolder();
 
   try {
     const base64 = await zip.generateAsync({ type: 'base64' });
     await Filesystem.writeFile({
-      path: relPath,
+      path: `${baseFolder}/${filename}`,
       data: base64,
-      directory: mapRootDir(cfg.root),
+      directory: Directory.Documents,
       recursive: true
     });
-    return `Saved to ${getRootDisplayPrefix(cfg.root)}/${relPath}`;
+    return `Saved to Documents/${baseFolder}/${filename}`;
   } catch {
     const blob = await zip.generateAsync({ type: 'blob' });
     triggerBrowserDownload(blob, filename);
@@ -171,7 +152,6 @@ export async function saveZipLocally(project: ProjectState): Promise<string> {
 export interface FullAgencyBackup {
   backup_version: string;
   exported_at: string;
-  storage_config?: StorageDirectoryConfig;
   profile: UserProfile;
   memories: MemoryItem[];
   projects: ProjectState[];
@@ -179,17 +159,13 @@ export interface FullAgencyBackup {
 }
 
 export async function exportFullStateBackup(data: Omit<FullAgencyBackup, 'backup_version' | 'exported_at'>): Promise<string> {
-  const cfg = loadStorageConfig();
   const payload: FullAgencyBackup = {
     backup_version: APP_VERSION,
     exported_at: new Date().toISOString(),
-    storage_config: cfg,
     ...data
   };
   const stamp = new Date().toISOString().slice(0, 10);
-  // Also write a lightweight cache copy
-  await saveTextLocally('cali-memory-cache.json', JSON.stringify({ profile: data.profile, memories: data.memories }, null, 2), 'Cache').catch(() => {});
-  return saveTextLocally(`cali-agency-backup-${stamp}.json`, JSON.stringify(payload, null, 2), 'Backups');
+  return saveTextLocally(`cali-agency-backup-${stamp}.json`, JSON.stringify(payload, null, 2));
 }
 
 export function parseFullStateBackup(rawJson: string): FullAgencyBackup {
@@ -200,7 +176,7 @@ export function parseFullStateBackup(rawJson: string): FullAgencyBackup {
   return parsed as FullAgencyBackup;
 }
 
-export function generatePwaIconsAndManifest(projectName: string, themeHex = '#6C4CD1'): Record<string, string> {
+export function generatePwaIconsAndManifest(projectName: string, themeHex = '#8B5CF6'): Record<string, string> {
   const cleanName = projectName.trim() || 'Agency PWA';
   const initials = cleanName
     .split(/\s+/)
@@ -231,55 +207,5 @@ export function generatePwaIconsAndManifest(projectName: string, themeHex = '#6C
     'icons/icon-192.svg': makeSvg(192),
     'icons/icon-512.svg': makeSvg(512),
     'manifest.webmanifest': JSON.stringify(manifest, null, 2)
-  };
-}
-
-export function generateAndroidApkScaffold(projectName: string): Record<string, string> {
-  const slug = slugifyProject(projectName);
-  const appId = `app.cali.${slug.replace(/[^a-z0-9]/g, '') || 'generated'}`;
-  return {
-    'capacitor.config.ts': `import type { CapacitorConfig } from '@capacitor/cli';
-
-const config: CapacitorConfig = {
-  appId: '${appId}',
-  appName: '${projectName.replace(/'/g, '')}',
-  webDir: 'dist',
-  server: { androidScheme: 'https' }
-};
-
-export default config;
-`,
-    '.github/workflows/main.yml': `name: Build Android APK
-
-on:
-  push:
-    branches: [main, master]
-  workflow_dispatch:
-
-jobs:
-  build-android-apk:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-      - uses: actions/setup-java@v5
-        with: { distribution: 'temurin', java-version: '17' }
-      - name: Accept Android SDK Licenses
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
-      - run: npm install
-      - run: npm run build
-      - name: Add & Sync Capacitor Android
-        run: |
-          if [ ! -d "android" ]; then npx cap add android; fi
-          npx cap sync android
-      - name: Build Debug APK
-        working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleDebug
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${slug}-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-`
   };
 }

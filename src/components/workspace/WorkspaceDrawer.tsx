@@ -1,33 +1,87 @@
 import React, { useMemo, useState } from 'react';
-import type { PhaseSnapshot, ProjectState } from '../../types/agency';
+import type { AgencyReport, PhaseSnapshot, ProjectState } from '../../types/agency';
 import type { ThemeTokens } from '../../theme/themes';
 import { type GitHubConfig, shipProjectToGitHub } from '../../engine/storage';
-import { generatePwaIconsAndManifest, getProjectLocalPath, saveZipLocally, syncProjectFolderLocally } from '../../engine/localSave';
+import {
+  generatePwaIconsAndManifest,
+  getLocalSaveFolder,
+  saveZipLocally,
+  slugifyProjectName,
+  syncAllProjectFilesToLocalFolder
+} from '../../engine/localSave';
 import type { ConfirmState } from '../common/ConfirmModal';
+import type { CanvasDocument } from '../common/ArtifactCanvasModal';
 import { SnapshotDiffModal } from './SnapshotDiffModal';
 
 interface WorkspaceDrawerProps {
   open: boolean;
   t: ThemeTokens;
   project: ProjectState | null;
+  reports?: AgencyReport[];
   githubConfig: GitHubConfig;
   onSendErrorToDebugger: (errorLog: string) => void;
   onRollbackSnapshot: (snapshot: PhaseSnapshot) => void;
   onAddGeneratedAssets: (files: Record<string, string>) => void;
   onDeleteProject: (projectId: string) => void;
+  onOpenCanvas?: (doc: CanvasDocument) => void;
+  onOpenFolderPicker?: () => void;
   onRequestConfirm: (state: ConfirmState) => void;
   onToast: (msg: string) => void;
+}
+
+/**
+ * Resolves local relative <link rel="stylesheet"> and <script src="..."> tags
+ * against project.files so multi-file PWAs run cleanly inside srcDoc preview.
+ */
+function buildBundledPreviewHtml(project: ProjectState): string {
+  let html = project.files['index.html'] || project.files['public/index.html'] || '';
+  if (!html) return '';
+
+  const lookupFile = (href: string): string | null => {
+    const clean = href.replace(/^\.\//, '').replace(/^\//, '');
+    return project.files[clean] ?? project.files[`src/${clean}`] ?? project.files[`public/${clean}`] ?? null;
+  };
+
+  // Inline local stylesheets
+  html = html.replace(/<link[^>]+href=["']([^"']+\.css)["'][^>]*>/gi, (match, href) => {
+    if (/^https?:\/\//i.test(href)) return match;
+    const css = lookupFile(href);
+    return css !== null ? `<style>/* ${href} */\n${css}\n</style>` : match;
+  });
+
+  // Inline local scripts
+  html = html.replace(/<script[^>]+src=["']([^"']+\.js)["'][^>]*>\s*<\/script>/gi, (match, src) => {
+    if (/^https?:\/\//i.test(src)) return match;
+    const js = lookupFile(src);
+    return js !== null ? `<script>/* ${src} */\n${js}\n<\/script>` : match;
+  });
+
+  const errorHook = `<script>
+    window.onerror = function(msg, src, line) {
+      parent.postMessage({ type: 'PWA_PREVIEW_ERR', msg: msg + ' (line ' + line + ')' }, '*');
+    };
+    const origErr = console.error;
+    console.error = function(...args) {
+      parent.postMessage({ type: 'PWA_PREVIEW_ERR', msg: args.join(' ') }, '*');
+      origErr.apply(console, args);
+    };
+  <\/script>`;
+
+  return html.includes('<head>') ? html.replace('<head>', `<head>${errorHook}`) : `${errorHook}${html}`;
 }
 
 export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   open,
   t,
   project,
+  reports = [],
   githubConfig,
   onSendErrorToDebugger,
   onRollbackSnapshot,
   onAddGeneratedAssets,
   onDeleteProject,
+  onOpenCanvas,
+  onOpenFolderPicker,
   onRequestConfirm,
   onToast
 }) => {
@@ -35,27 +89,12 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   const [tab, setTab] = useState<'files' | 'preview' | 'snapshots'>('files');
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [shipping, setShipping] = useState(false);
+  const [syncingFolder, setSyncingFolder] = useState(false);
   const [diffSnapshot, setDiffSnapshot] = useState<PhaseSnapshot | null>(null);
 
   const fileList = useMemo(() => (project ? Object.keys(project.files) : []), [project]);
   const activePath = selectedFile && project?.files[selectedFile] ? selectedFile : fileList[0] || null;
-
-  const previewHtml = useMemo(() => {
-    if (!project) return '';
-    const html = project.files['index.html'] || project.files['public/index.html'] || '';
-    if (!html) return '';
-    const errorHook = `<script>
-      window.onerror = function(msg, src, line) {
-        parent.postMessage({ type: 'PWA_PREVIEW_ERR', msg: msg + ' (line ' + line + ')' }, '*');
-      };
-      const origErr = console.error;
-      console.error = function(...args) {
-        parent.postMessage({ type: 'PWA_PREVIEW_ERR', msg: args.join(' ') }, '*');
-        origErr.apply(console, args);
-      };
-    </script>`;
-    return html.includes('<head>') ? html.replace('<head>', `<head>${errorHook}`) : `${errorHook}${html}`;
-  }, [project]);
+  const previewHtml = useMemo(() => (project ? buildBundledPreviewHtml(project) : ''), [project]);
 
   React.useEffect(() => {
     const onMsg = (ev: MessageEvent) => {
@@ -69,15 +108,26 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
   if (!open) return null;
 
+  const folderLabel = project
+    ? `Documents/${getLocalSaveFolder()}/${slugifyProjectName(project.project_name)}/`
+    : `Documents/${getLocalSaveFolder()}/`;
+
+  const handleSyncFolderNow = async () => {
+    if (!project) return;
+    setSyncingFolder(true);
+    const projectReports = reports.filter((r) => r.projectId === project.id);
+    const res = await syncAllProjectFilesToLocalFolder(project, projectReports);
+    setSyncingFolder(false);
+    if (res.nativeOk) {
+      onToast(`Synced ${res.syncedFiles} files & ${res.syncedReports} reports to ${res.folderPath}`);
+    } else {
+      onToast('Web preview mode: use Save .zip to download files locally');
+    }
+  };
+
   const handleSaveLocally = async () => {
     if (!project) return;
     const msg = await saveZipLocally(project);
-    onToast(msg);
-  };
-
-  const handleSyncFolder = async () => {
-    if (!project) return;
-    const msg = await syncProjectFolderLocally(project);
     onToast(msg);
   };
 
@@ -93,7 +143,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
     setShipping(true);
     try {
       const res = await shipProjectToGitHub(project, githubConfig, (msg) => onToast(msg));
-      onToast(`Shipped ${res.pushedCount} files to GitHub!`);
+      onToast(`Shipped ${res.pushedCount} files to GitHub`);
     } catch (err) {
       onToast((err as Error).message);
     } finally {
@@ -103,20 +153,44 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
   return (
     <div className={`absolute inset-0 z-20 flex flex-col backdrop-blur-2xl p-4 ${t.overlay}`}>
-      <div className="flex items-center justify-between pb-3 border-b border-current/10 shrink-0">
-        <div>
-          <h3 className="text-base font-semibold leading-none">Workspace &amp; Local Save</h3>
-          <p className="text-[11px] opacity-60 mt-1">
-            {project ? `${project.project_name} (${project.target_platform || 'PWA'}) • ${fileList.length} files` : 'No active project'}
+      <div className="flex items-center justify-between pb-3 border-b border-current/10 shrink-0 gap-2">
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold leading-none truncate">Workspace &amp; Local Sync</h3>
+          <p className="text-[11px] opacity-60 mt-1 truncate">
+            {project ? `${project.project_name} / ${fileList.length} files` : 'No active project'}
           </p>
         </div>
         {project && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              disabled={syncingFolder}
+              onClick={() => void handleSyncFolderNow()}
+              className={`px-2.5 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer ${t.primaryBtn}`}
+            >
+              {syncingFolder ? 'Syncing...' : 'Sync Folder'}
+            </button>
+            <button
+              type="button"
+              onClick={handleGenerateIcons}
+              className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer ${t.secondaryBtn}`}
+            >
+              + Icons
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Active Local Folder Path Bar */}
+      <div className={`mt-2.5 rounded-2xl border px-3 py-2 flex items-center justify-between gap-2 text-[10px] font-mono ${t.surface}`}>
+        <span className="truncate opacity-75">{folderLabel}</span>
+        {onOpenFolderPicker && (
           <button
             type="button"
-            onClick={handleGenerateIcons}
-            className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer ${t.secondaryBtn}`}
+            onClick={onOpenFolderPicker}
+            className="text-accent font-semibold shrink-0 cursor-pointer hover:underline"
           >
-            + PWA Icons
+            Change
           </button>
         )}
       </div>
@@ -150,45 +224,31 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
           <button
             type="button"
             disabled={!project}
-            onClick={handleSaveLocally}
+            onClick={() => void handleSaveLocally()}
             className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer disabled:opacity-40 ${t.secondaryBtn}`}
           >
             Save .zip
           </button>
           <button
             type="button"
-            disabled={!project}
-            onClick={handleSyncFolder}
-            className={`px-3 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer disabled:opacity-40 ${t.secondaryBtn}`}
-          >
-            Sync Folder
-          </button>
-          <button
-            type="button"
             disabled={!project || shipping}
-            onClick={handleShipGitHub}
+            onClick={() => void handleShipGitHub()}
             className={`px-3 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer disabled:opacity-40 ${t.primaryBtn}`}
           >
-            {shipping ? 'Shipping…' : 'Ship GitHub'}
+            {shipping ? 'Shipping...' : 'Ship GitHub'}
           </button>
         </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto pb-28 space-y-3">
-        {project && (
-          <div className={`rounded-2xl border px-3.5 py-2 flex items-center justify-between gap-2 text-[10px] font-mono ${t.surface}`}>
-            <span className="truncate opacity-75">Path: {project.local_path || getProjectLocalPath(project.project_name)}</span>
-            <span className="text-accent shrink-0">{project.target_platform || 'PWA'}</span>
-          </div>
-        )}
         {!project ? (
           <div className={`rounded-2xl border p-6 text-center text-xs opacity-65 ${t.surface}`}>
-            No active project yet. Import a Markdown blueprint from Home or chat with Cali.
+            No active project selected. Open one from the Project Hub or start a New Project with Cali.
           </div>
         ) : tab === 'files' ? (
           fileList.length === 0 ? (
             <div className={`rounded-2xl border p-6 text-center text-xs opacity-65 ${t.surface}`}>
-              Project initialized. Start production or tap + PWA Icons to scaffold manifest &amp; icons.
+              Project initialized. Start production to generate files into IndexedDB and your local folder.
             </div>
           ) : (
             <>
@@ -208,11 +268,28 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
               </div>
               {activePath && (
                 <div className={`rounded-2xl border overflow-hidden ${t.surface}`}>
-                  <div className="px-3.5 py-2 border-b border-current/10 text-[11px] font-mono opacity-65 flex justify-between">
-                    <span>{activePath}</span>
-                    <span>{project.files[activePath].split('\n').length} lines</span>
+                  <div className="px-3.5 py-2 border-b border-current/10 text-[11px] font-mono flex items-center justify-between gap-2">
+                    <span className="truncate opacity-75">{activePath}</span>
+                    {onOpenCanvas && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onOpenCanvas({
+                            category: 'CODE CANVAS',
+                            title: activePath,
+                            subtitle: `${project.project_name} / ${project.files[activePath].split('\n').length} lines`,
+                            content: project.files[activePath],
+                            mode: 'code',
+                            filename: activePath
+                          })
+                        }
+                        className="text-accent font-semibold shrink-0 cursor-pointer hover:underline"
+                      >
+                        Full Canvas
+                      </button>
+                    )}
                   </div>
-                  <pre className="p-3.5 text-[11px] font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-h-[50vh]">
+                  <pre className="p-3.5 text-[11px] font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-h-[48vh]">
                     {project.files[activePath]}
                   </pre>
                 </div>
@@ -223,7 +300,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
           <div className="space-y-3">
             {previewHtml ? (
               <iframe
-                title="Live PWA Sandbox"
+                title="Multi-File Live Preview"
                 sandbox="allow-scripts"
                 srcDoc={previewHtml}
                 className="w-full h-[46vh] rounded-2xl border border-current/15 bg-white"
@@ -245,7 +322,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                     onClick={() => onSendErrorToDebugger(consoleLogs.join('\n'))}
                     className={`px-3 py-1 rounded-full text-[11px] font-semibold cursor-pointer ${t.primaryBtn}`}
                   >
-                    Send Error to 09. Debugger
+                    Send Error to Debugger
                   </button>
                 )}
               </div>
@@ -272,7 +349,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                   <div className="min-w-0">
                     <div className="text-xs font-semibold truncate">{snap.phase_name}</div>
                     <div className="text-[10px] font-mono opacity-60">
-                      {snap.file_count} files • {new Date(snap.created_at).toLocaleString()}
+                      {snap.file_count} files / {new Date(snap.created_at).toLocaleString()}
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -328,7 +405,6 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
         )}
       </div>
 
-      {/* Snapshot Diff Modal */}
       <SnapshotDiffModal
         snapshot={diffSnapshot}
         currentFiles={project?.files || {}}

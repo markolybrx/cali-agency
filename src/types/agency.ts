@@ -1,15 +1,9 @@
-export type ThemeId = 'monolith' | 'nocturne' | 'alabaster';
+export type ThemeId = 'monolith' | 'light';
 export type AccentId = 'marigold' | 'lavender' | 'champagne' | 'silverblue';
 export type LanguagePref = 'en' | 'taglish';
 export type ThinkingLevel = 'low' | 'medium' | 'high';
-export type ProjectTarget = 'PWA' | 'ANDROID_APK';
-export type StorageRootId = 'DOCUMENTS' | 'EXTERNAL' | 'DATA';
-
-export interface StorageDirectoryConfig {
-  root: StorageRootId;
-  baseFolder: string;
-  configured: boolean;
-}
+export type StudioPace = 'studio' | 'brisk' | 'turbo';
+export type ProjectTarget = 'pwa' | 'apk';
 
 export type KeySlotId = 'KEY_CALI' | 'K1' | 'K2' | 'K3' | 'K4';
 export type KeyStatus = 'UNSET' | 'READY' | 'ACTIVE' | 'COOLDOWN' | 'BACKOFF' | 'INVALID';
@@ -122,8 +116,7 @@ export interface TechStack {
 export interface ProjectState {
   id: string;
   project_name: string;
-  target_platform: ProjectTarget;
-  local_path?: string;
+  target_platform?: ProjectTarget;
   blueprint_md: string;
   current_phase_id: number;
   tech_stack: TechStack;
@@ -133,6 +126,32 @@ export interface ProjectState {
   snapshots: PhaseSnapshot[];
   created_at: string;
   updated_at: string;
+}
+
+export interface AgencyReport {
+  id: string;
+  projectId: string | null;
+  projectName: string;
+  category: 'phase' | 'cali' | 'board' | 'coaching' | 'final';
+  badge: string;
+  title: string;
+  author: string;
+  summary: string;
+  markdown: string;
+  metrics?: Array<{ label: string; value: string }>;
+  createdAt: string;
+}
+
+export interface ChatActionBox {
+  id: string;
+  kind: 'PHASE_GATE' | 'LAUNCH_BLUEPRINT' | 'BOARDROOM' | 'SUGGESTION';
+  title: string;
+  detail: string;
+  approveLabel: string;
+  declineLabel: string;
+  status: 'pending' | 'approved' | 'declined';
+  resolvedLabel?: string;
+  payload?: Record<string, unknown>;
 }
 
 export interface MemoryItem {
@@ -173,6 +192,11 @@ export interface ChatMessage {
   meta?: string;
   ts: string;
   blueprintDraft?: string;
+  reportId?: string;
+  canvasTitle?: string;
+  canvasSubtitle?: string;
+  canvasContent?: string;
+  actionBox?: ChatActionBox;
 }
 
 export interface OnboardingTopics {
