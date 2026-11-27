@@ -13,14 +13,13 @@ export const CHANGELOG: ChangelogRelease[] = [
   {
     version: 'v0.8.0',
     date: '2026-11-27',
-    title: 'Part A: Project Hub Flow, IndexedDB + Local Sync, Editorial Reports & Bug Fixes',
+    title: 'Parts A & B: 24-Person Company, Deep Prompts, 4-Gate Planning, Suggestions & Coaching',
     highlights: [
-      'New Entry Flow: Login Gate (Google Sign-In or Offline Local Save) -> Onboarding (first-time) -> Project Selection Hub -> Scoped Project Dashboard.',
-      'Fixed Phase 1 -> Phase 2 stall with atomic advanceToNextPhase() and permanently greyed-out Chat Action CTAs once approved or declined.',
-      'Migrated projects, files, snapshots, and reports to IndexedDB (cali_agency_db) with live write-through to your chosen Android local folder.',
-      'Added 1-Tap Reports Hub and Full-Screen Editorial Canvas Viewer for Phase Accomplishment Reports, Cali Sitreps, Blueprints, and Code.',
-      'Upgraded Workspace Live Preview to automatically bundle multi-file local CSS and JS, plus Studio Pacing (Studio / Brisk / Turbo).',
-      'Simplified appearance to Original Monolith only: Dark Mode default with a clean Light Mode toggle.'
+      'Part B: Realistic 4-Tier 24-Person Company Org Hierarchy (CEO -> COO -> 4 Directors -> 4 Team Leads -> 15 Specialists) with interactive Org Chart.',
+      'Part B: Rebuilt all 24 staff prompts to deep 7-part agency-agents standard (Identity, Mission, Guardrails, Deliverables, Escalation, Handoffs, Strict JSON).',
+      'Part B: 4-Gate Elaborated Project Planning in Chat & Voice (Vision -> MVP & Pushback -> Architecture & UI Taste -> Full Blueprint Canvas).',
+      'Part B: Employee Suggestion Board (Specialist -> Team Lead -> Director -> Cali -> CEO escalation with grey-out CTAs) and 1-on-1 Coaching / Squad Huddle Engine.',
+      'Part A: Login Gate -> Onboarding -> Project Selection Hub -> Scoped Dashboard, IndexedDB + Live Local Folder Sync, Editorial Reports Hub, and Original Monolith Dark/Light Mode.'
     ]
   },
   {

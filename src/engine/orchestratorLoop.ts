@@ -21,6 +21,8 @@ import { writeProjectFileToLocalFolder, writeReportToLocalFolder } from './local
 export interface LoopHooks {
   onProjectUpdate: (project: ProjectState) => void;
   onReportCreated?: (report: AgencyReport) => void;
+  onSuggestionRaised?: (specialistId: string, title: string, rationale: string, impact?: 'UX' | 'Performance' | 'Reliability' | 'Security') => void;
+  onCoachingTriggered?: (kind: 'one_on_one' | 'squad_huddle', project: ProjectState, specialistId: string, taskId: string, reason: string, takeaway: string) => void;
   onPhaseGateReady?: (project: ProjectState, completedPhaseId: number, report: AgencyReport) => void;
   onActivity: (event: Omit<ActivityEvent, 'id' | 'ts'>) => void;
   onHandoff: (from: WorkerAgentId | 'cali', to: WorkerAgentId | 'cali', label: string) => void;
@@ -39,6 +41,7 @@ interface WorkerResponse {
   verification_commands?: string[];
   handoff_notes?: string[];
   blockers?: string[];
+  suggestion?: { title: string; rationale: string; impact?: 'UX' | 'Performance' | 'Reliability' | 'Security' };
 }
 
 const PACE_TIMINGS: Record<StudioPace, { walkMs: number; fileWriteMs: number; handoffMs: number }> = {
@@ -380,6 +383,14 @@ export class AgencyOrchestratorLoop {
           }
         }
 
+        if (out.suggestion && out.suggestion.title) {
+          this.hooks.onSuggestionRaised?.(
+            nextTask.assigned_agent,
+            out.suggestion.title,
+            out.suggestion.rationale || 'Proposed during active sprint.',
+            out.suggestion.impact
+          );
+        }
         nextTask.last_summary = out.summary;
         nextTask.handoff_notes = out.handoff_notes || [];
         nextTask.status = 'CODED';
@@ -388,6 +399,14 @@ export class AgencyOrchestratorLoop {
 
         const preCheck = runStaticPreCheck(out.files || []);
         if (!preCheck.passed) {
+          this.hooks.onCoachingTriggered?.(
+            'one_on_one',
+            project,
+            nextTask.assigned_agent,
+            nextTask.task_id,
+            `Static Pre-Check flagged: ${preCheck.issues.join('; ')}`,
+            'Verify JSON syntax, complete file output, and zero native popup calls before handoff.'
+          );
           this.hooks.onActivity({
             agentId: 'precheck',
             text: `Static Pre-Check caught ${preCheck.issues.length} issue(s) -> routing to Debugger.`,
@@ -446,6 +465,14 @@ export class AgencyOrchestratorLoop {
             this.pause();
             return;
           }
+          this.hooks.onCoachingTriggered?.(
+            'one_on_one',
+            project,
+            nextTask.assigned_agent,
+            nextTask.task_id,
+            `Staff Code Reviewer blockers: ${(revRes.data.blockers || []).join('; ')}`,
+            'Apply surgical fix with Debugger and align with locked tech_stack contracts.'
+          );
           this.hooks.onHandoff('code-reviewer', 'debugger', 'Critical blockers');
           await delay(timing.handoffMs);
           await this.runDebuggerPatch(project, nextTask, revRes.data.blockers || []);
@@ -622,6 +649,14 @@ export class AgencyOrchestratorLoop {
     const splitB: AgencyTask = { ...task, task_id: `${task.task_id}B`, title: `${task.title} (Part 2)`, split_depth: task.split_depth + 1, status: 'PENDING' };
     const idx = phase.tasks.findIndex((t) => t.task_id === task.task_id);
     phase.tasks.splice(idx, 1, splitA, splitB);
+    this.hooks.onCoachingTriggered?.(
+      'squad_huddle',
+      project,
+      task.assigned_agent,
+      task.task_id,
+      `Oversized ticket (${reason}) decomposed into ${splitA.task_id} and ${splitB.task_id}.`,
+      'Keep atomic tasks under 350 lines and 1-3 files to maintain clean diffs.'
+    );
     this.hooks.onActivity({ agentId: 'master-orchestrator', text: `Autonomous SPLIT_TASK: ${task.task_id} -> ${splitA.task_id} & ${splitB.task_id}`, kind: 'handoff' });
     this.hooks.onProjectUpdate({ ...project });
   }

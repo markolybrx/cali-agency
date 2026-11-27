@@ -69,6 +69,19 @@ import { CaliSignInModal } from './components/auth/CaliSignInModal';
 import { LoginGate } from './components/auth/LoginGate';
 import { ProjectHub } from './components/hub/ProjectHub';
 import { ReportsDrawer } from './components/reports/ReportsDrawer';
+import { SuggestionBoardModal } from './components/culture/SuggestionBoardModal';
+import { CoachingLogsModal } from './components/culture/CoachingLogsModal';
+import { OrgChartModal } from './components/culture/OrgChartModal';
+import {
+  type CoachingSession,
+  createCoachingRecord,
+  createEscalatedSuggestion,
+  loadCoachingSessions,
+  loadSuggestions,
+  saveCoachingSessions,
+  saveSuggestions,
+  type TeamSuggestion
+} from './engine/workplaceCulture';
 
 type EntryStage = 'login' | 'hub' | 'app';
 type TabId = 'office' | 'workspace' | 'reports' | 'home' | 'prompts' | 'memory' | 'settings' | 'telemetry';
@@ -140,6 +153,12 @@ export default function App() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null);
+  const [suggestions, setSuggestions] = useState<TeamSuggestion[]>(() => loadSuggestions());
+  const [coachingLogs, setCoachingLogs] = useState<CoachingSession[]>(() => loadCoachingSessions());
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [coachingOpen, setCoachingOpen] = useState(false);
+  const [orgChartOpen, setOrgChartOpen] = useState(false);
+  const [planningGate, setPlanningGate] = useState<1 | 2 | 3 | 4>(1);
 
   const [loopStatus, setLoopStatus] = useState<'IDLE' | 'RUNNING' | 'PAUSED' | 'WATCHDOG' | 'DEMO'>('IDLE');
   const [hubTab, setHubTab] = useState<'feed' | 'agents' | 'checklist' | 'watchdog'>('feed');
@@ -408,6 +427,39 @@ export default function App() {
     orchestratorRef.current = new AgencyOrchestratorLoop({
       onProjectUpdate: (proj) => upsertProject(proj),
       onReportCreated: (rep) => saveReportRecord(rep),
+      onSuggestionRaised: (specialistId, title, rationale, impact) => {
+        const sug = createEscalatedSuggestion({
+          projectId: liveStateRef.current.activeProject?.id || null,
+          specialistId,
+          title,
+          rationale,
+          impact
+        });
+        setSuggestions((prev) => {
+          const next = [sug, ...prev];
+          saveSuggestions(next);
+          return next;
+        });
+        showToast(`Escalated Suggestion: ${sug.title.slice(0, 42)}`);
+      },
+      onCoachingTriggered: (kind, proj, specialistId, taskId, reason, takeaway) => {
+        const { session, report } = createCoachingRecord({
+          kind,
+          projectId: proj.id,
+          projectName: proj.project_name,
+          specialistId,
+          taskId,
+          triggerReason: reason,
+          takeaway
+        });
+        setCoachingLogs((prev) => {
+          const next = [session, ...prev];
+          saveCoachingSessions(next);
+          return next;
+        });
+        saveReportRecord(report);
+        void writeReportToLocalFolder(proj.project_name, report);
+      },
       onPhaseGateReady: (proj, completedPhaseId, report) => {
         const nextPhaseId = completedPhaseId + 1;
         setMessages((prev) => [
@@ -683,6 +735,8 @@ export default function App() {
         memories,
         sharedMemories: brainCache.sharedMemories,
         clearance: brainCache.clearance,
+        chatScope,
+        currentPlanningGate: planningGate,
         activeProject: chatScope === 'project' ? activeProject : null,
         pendingDecisions: decisions
       });
@@ -737,6 +791,9 @@ export default function App() {
         }
       }
 
+      if (chatScope === 'planning' && res.planning_gate) {
+        setPlanningGate(res.planning_gate);
+      }
       const hasDraft = res.agency_command === 'DRAFT_BLUEPRINT' && Boolean(res.blueprint_markdown);
 
       setMessages((prev) => [
@@ -986,6 +1043,7 @@ export default function App() {
               }}
               onNewProject={() => {
                 setChatScope('planning');
+                setPlanningGate(1);
                 setStage('app');
                 setActiveTab('home');
                 setChatOpen(true);
@@ -1149,6 +1207,44 @@ export default function App() {
                     <span className={`px-3 py-1.5 rounded-full text-[11px] font-semibold ${t.primaryBtn}`}>Generate</span>
                   </button>
                 )}
+
+                {/* Company Culture Strip: Suggestions, Coaching Pods & 24-Person Org */}
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSuggestionsOpen(true)}
+                    className={`relative rounded-2xl border p-3 text-left space-y-1 cursor-pointer ${t.surface}`}
+                  >
+                    {suggestions.some((s) => s.status === 'escalated') && (
+                      <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-[#FFB732]" />
+                    )}
+                    <div className="text-[10px] font-mono uppercase text-accent font-semibold">Board</div>
+                    <div className="text-xs font-bold">Suggestions</div>
+                    <div className="text-[10px] opacity-60">
+                      {suggestions.filter((s) => s.status === 'escalated').length} Escalated
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCoachingOpen(true)}
+                    className={`rounded-2xl border p-3 text-left space-y-1 cursor-pointer ${t.surface}`}
+                  >
+                    <div className="text-[10px] font-mono uppercase text-accent font-semibold">Pods</div>
+                    <div className="text-xs font-bold">Coaching</div>
+                    <div className="text-[10px] opacity-60">{coachingLogs.length} Sessions</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setOrgChartOpen(true)}
+                    className={`rounded-2xl border p-3 text-left space-y-1 cursor-pointer ${t.surface}`}
+                  >
+                    <div className="text-[10px] font-mono uppercase text-accent font-semibold">4 Tiers</div>
+                    <div className="text-xs font-bold">24 Staff Org</div>
+                    <div className="text-[10px] opacity-60">View Chart</div>
+                  </button>
+                </div>
 
                 {/* Pending Decisions Bar */}
                 <button
@@ -1825,6 +1921,26 @@ export default function App() {
                   </div>
                 </div>
 
+                {chatScope === 'planning' && (
+                  <div className="px-5 py-2.5 border-b border-current/10 grid grid-cols-4 gap-1.5 shrink-0">
+                    {(
+                      [
+                        [1, '1. Vision'],
+                        [2, '2. MVP'],
+                        [3, '3. Stack'],
+                        [4, '4. Blueprint']
+                      ] as const
+                    ).map(([g, label]) => (
+                      <div key={g} className="space-y-1">
+                        <div className={`h-1.5 rounded-full ${planningGate >= g ? t.dot : 'bg-current/15'}`} />
+                        <div className={`text-[9px] font-mono truncate ${planningGate >= g ? 'text-accent font-semibold' : 'opacity-50'}`}>
+                          {label}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
                   {messages.map((m) => (
                     <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} space-y-2`}>
@@ -2138,6 +2254,60 @@ export default function App() {
               onClose={() => setModelPickerKeyId(null)}
               t={t}
             />
+            <SuggestionBoardModal
+              open={suggestionsOpen}
+              suggestions={suggestions}
+              onResolve={(id, decision) => {
+                setSuggestions((prev) => {
+                  const next = prev.map((s) => (s.id === id ? { ...s, status: decision } : s));
+                  saveSuggestions(next);
+                  return next;
+                });
+                showToast(decision === 'approved' ? 'Suggestion approved & queued' : 'Suggestion deferred');
+              }}
+              onSimulateNew={(title, rationale, impact) => {
+                const sug = createEscalatedSuggestion({
+                  projectId: activeProject?.id || null,
+                  specialistId: 'frontend-developer',
+                  title,
+                  rationale,
+                  impact
+                });
+                setSuggestions((prev) => {
+                  const next = [sug, ...prev];
+                  saveSuggestions(next);
+                  return next;
+                });
+                showToast('Pinned & escalated to Cali (COO)');
+              }}
+              onClose={() => setSuggestionsOpen(false)}
+              t={t}
+            />
+            <CoachingLogsModal
+              open={coachingOpen}
+              sessions={coachingLogs}
+              onTriggerDemoCoaching={() => {
+                const { session, report } = createCoachingRecord({
+                  kind: 'one_on_one',
+                  projectId: activeProject?.id || null,
+                  projectName: activeProject?.project_name || 'Cali Studio',
+                  specialistId: 'mobile-pwa-builder',
+                  taskId: 'P1-T2',
+                  triggerReason: 'Static Pre-Check flagged a trailing comma in manifest.webmanifest.',
+                  takeaway: 'Validated strict JSON formatting and verified offline icon paths before retry.'
+                });
+                setCoachingLogs((prev) => {
+                  const next = [session, ...prev];
+                  saveCoachingSessions(next);
+                  return next;
+                });
+                saveReportRecord(report);
+                showToast('1-on-1 Coaching Pod logged & saved to Reports');
+              }}
+              onClose={() => setCoachingOpen(false)}
+              t={t}
+            />
+            <OrgChartModal open={orgChartOpen} onClose={() => setOrgChartOpen(false)} t={t} />
             <ConfirmModal state={confirmState} onCancel={() => setConfirmState(null)} t={t} />
           </>
         )}

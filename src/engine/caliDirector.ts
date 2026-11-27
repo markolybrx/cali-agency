@@ -22,34 +22,35 @@ export interface CaliTurnResult {
     value: string;
   }>;
   completed_topics: Array<keyof OnboardingTopics>;
+  planning_gate?: 1 | 2 | 3 | 4;
   agency_command: 'NONE' | 'DRAFT_BLUEPRINT' | 'START_BLUEPRINT' | 'PAUSE_LOOP' | 'RESUME_LOOP' | 'APPROVE_PENDING';
   blueprint_markdown?: string;
 }
 
 const CONVERSATIONAL_SYSTEM_ADDENDUM = `
-## 3-LAYER JARVIS BRAIN & CONVERSATIONAL ONBOARDING RULES
-- You operate with a 3-Layer Brain:
-  1. Layer 1 (shared_brain): Non-sensitive collective patterns shared across all users.
-  2. Layer 2 (private_vault): Strictly private memories for the current user ONLY. Never leak secrets.
-  3. Clearance: If user_clearance is "BOSS", treat them as your primary creator/director (Tony Stark -> JARVIS rapport).
-- Be genuinely conversational, warm, and natural—NOT a robotic survey.
-- If onboarding_complete is false, check which keys in user_profile.onboarding_topics are still false:
-  1. "name_vibe": user's preferred name and English vs Taglish vibe.
-  2. "design_taste": visual taste, colors, typography, or UI pet peeves.
-  3. "tech_stack": preferred default PWA stack.
-  4. "autonomy": whether to pause at Phase Gates or run autonomously until blockers.
-- IMPORTANT: Whenever the user answers a topic, ALWAYS include its exact key ("name_vibe", "design_taste", "tech_stack", or "autonomy") in "completed_topics". When all 4 are answered, congratulate them warmly and let them know the dashboard is unlocked.
-- Only put strictly non-personal, reusable technical/UX wisdom into "shared_candidates" (never names, emails, keys, or personal details).
-- When the user pitches a PWA/APK idea after onboarding, set "agency_command": "DRAFT_BLUEPRINT" and put a clean Markdown blueprint in "blueprint_markdown".
-- Return raw valid JSON:
+## 3-LAYER JARVIS BRAIN, ONBOARDING & 4-GATE ELABORATED PLANNING RULES
+- Zero emojis in all responses. Warm, sharp, casual JARVIS + trusted friend cadence.
+- 3-Layer Brain:
+  1. Layer 1 (shared_brain): Collective non-sensitive engineering/UX knowledge.
+  2. Layer 2 (private_vault): Strictly private memories for this user ONLY.
+  3. Clearance: If user_clearance is "BOSS", treat them as Founder & CEO (Tony Stark -> JARVIS dynamic).
+- If onboarding_complete is false, cover the 4 missing keys in user_profile.onboarding_topics ("name_vibe", "design_taste", "tech_stack", "autonomy") naturally and ALWAYS emit answered keys in "completed_topics".
+- IF chat_scope === "planning" (New Project Planning Mode):
+  - Conduct an elaborated, deeply thoughtful **4-Gate Discovery Conversation** (do NOT rush a shallow blueprint on turn 1):
+    * **Gate 1 (Vision & Users):** Ask clarifying questions about the problem, who uses it, and the core daily flow. Return `"planning_gate": 1`.
+    * **Gate 2 (MVP Scope & Anti-Scope):** Propose 3-5 must-have features, challenge scope creep once (Constructive Pushback), clarify offline/edge cases. Return `"planning_gate": 2`.
+    * **Gate 3 (Architecture & UI Taste):** Confirm PWA vs Android APK target, Original Monolith Dark/Light layout, IndexedDB/Supabase storage, and special interactions. Return `"planning_gate": 3`.
+    * **Gate 4 (Complete Blueprint Canvas):** Once all 3 gates are covered (or user says "draft the blueprint now"), emit `"planning_gate": 4`, `"agency_command": "DRAFT_BLUEPRINT"`, and a comprehensive, multi-phase Markdown blueprint in `"blueprint_markdown"` (Vision, Locked Tech Stack, 3-4 Sequential Phases, Atomic Tasks, and Verifiable Checklists).
+- Return ONLY raw valid JSON:
 {
   "message": "string",
-  "speech": "string or null",
+  "speech": "concise spoken version or null",
   "memory_ops": [],
   "shared_candidates": [],
-  "completed_topics": ["name_vibe"],
+  "completed_topics": [],
+  "planning_gate": 1,
   "agency_command": "NONE | DRAFT_BLUEPRINT | START_BLUEPRINT | PAUSE_LOOP | RESUME_LOOP | APPROVE_PENDING",
-  "blueprint_markdown": "optional markdown string"
+  "blueprint_markdown": "optional comprehensive markdown blueprint"
 }`;
 
 export async function runCaliTurn(params: {
@@ -59,6 +60,8 @@ export async function runCaliTurn(params: {
   memories: MemoryItem[];
   sharedMemories?: SharedMemoryItem[];
   clearance?: ClearanceLevel;
+  chatScope?: 'project' | 'planning' | 'general';
+  currentPlanningGate?: 1 | 2 | 3 | 4;
   activeProject: ProjectState | null;
   pendingDecisions: PendingDecision[];
 }): Promise<CaliTurnResult> {
@@ -90,17 +93,16 @@ export async function runCaliTurn(params: {
       const followUps: Record<keyof OnboardingTopics, string> = {
         name_vibe: 'First up—what should I call you, and do you prefer clean English or natural Taglish?',
         design_taste:
-          'Nice to meet you. Before I brief the UI Designer, what kind of app aesthetic do you actually love—and any UI pet peeves I should ban?',
+          'Nice to meet you. Before I brief the Creative Director, what kind of app aesthetic do you love—and any UI pet peeves we should ban?',
         tech_stack:
-          'Solid taste—I locked that in. For apps we build together, do you have a favorite stack (like Vanilla JS, React + Vite, Tailwind), or should I pick the leanest one per project?',
+          'Solid taste—locked that in. For apps we build together, do you have a favorite stack (Vanilla JS, React + Vite, Tailwind, IndexedDB), or should CTO pick the leanest stack per project?',
         autonomy:
-          'Got it. Last thing before I unlock the agency floor: want me to pause and check in with you at every Phase Gate, or keep the 13 agents rolling until we hit a real blocker?'
+          'Got it. Last question before we open the Project Hub: want me to pause at every Phase Gate for your review, or keep the 24-person studio rolling until a real blocker hits?'
       };
 
       if (!nextTopic) {
         return {
-          message:
-            'Love it—we are completely aligned! I saved your preferences locally and unlocked the Monolith HQ dashboard.',
+          message: 'We are completely aligned. I saved your preferences locally and unlocked the Project Hub.',
           speech: null,
           memory_ops: ops,
           completed_topics: currentTopic ? [currentTopic] : ['name_vibe', 'design_taste', 'tech_stack', 'autonomy'],
@@ -117,6 +119,57 @@ export async function runCaliTurn(params: {
       };
     }
 
+    // Offline 4-Gate Planning Walkthrough
+    if (params.chatScope === 'planning') {
+      const gate = params.currentPlanningGate || 1;
+      if (gate === 1) {
+        return {
+          message: 'Gate 1 locked. Now for Gate 2 (MVP & Anti-Scope): what are the 3 absolute must-have features for v1, and what should we deliberately leave out so Phase 1 ships fast?',
+          speech: null,
+          memory_ops: [],
+          completed_topics: [],
+          planning_gate: 2,
+          agency_command: 'NONE'
+        };
+      }
+      if (gate === 2) {
+        return {
+          message: 'Gate 2 locked. Moving to Gate 3 (Architecture & UI Taste): should this target a Web PWA or Android APK, and do you want offline IndexedDB storage with our Original Monolith Dark/Light UI?',
+          speech: null,
+          memory_ops: [],
+          completed_topics: [],
+          planning_gate: 3,
+          agency_command: 'NONE'
+        };
+      }
+      const draftMd = [
+        '# Project Blueprint: Custom Agency App',
+        '',
+        '## 1. Vision & Core Problem',
+        params.userMessage,
+        '',
+        '## 2. Locked Tech Stack',
+        '- **Framework:** Vanilla HTML/CSS/JS (Offline-First PWA)',
+        '- **Storage:** IndexedDB + Local Folder Sync',
+        '- **Design:** Original Monolith (Dark Default + Light Mode)',
+        '',
+        '## 3. Phased Delivery Plan',
+        '- **Phase 1:** Foundation, Design Tokens, App Shell, Manifest & Service Worker',
+        '- **Phase 2:** Core MVP Workflows & Offline Persistence',
+        '- **Phase 3:** QA Automation, Accessibility Audit & Release Docs'
+      ].join('\n');
+
+      return {
+        message: 'All 4 planning gates are complete. Tap the Blueprint Canvas card below to inspect the full spec, then approve to launch Phase 1.',
+        speech: null,
+        memory_ops: [],
+        completed_topics: [],
+        planning_gate: 4,
+        agency_command: 'DRAFT_BLUEPRINT',
+        blueprint_markdown: draftMd
+      };
+    }
+
     const lower = params.userMessage.toLowerCase();
     if (lower.includes('pause')) {
       return { message: 'Pausing the agency floor now.', speech: null, memory_ops: [], completed_topics: [], agency_command: 'PAUSE_LOOP' };
@@ -126,8 +179,8 @@ export async function runCaliTurn(params: {
     }
     return {
       message: !navigator.onLine
-        ? 'You are currently offline. You can still browse all projects, preview code, use the 3D Office, and save .zip backups locally—I will sync automatically once internet returns.'
-        : 'Configure KEY_CALI in Settings (and tap Save Settings) so I can converse live and draft blueprints for your 13 agents.',
+        ? 'You are currently offline. Your projects, files, 3D Office, and reports remain fully accessible locally.'
+        : 'Configure KEY_CALI in Settings (and tap Save Settings) so I can converse live and run 4-Gate planning.',
       speech: null,
       memory_ops: [],
       completed_topics: [],
@@ -140,7 +193,9 @@ export async function runCaliTurn(params: {
 
   const payload = {
     user_clearance: params.clearance || 'USER',
-    conversation_history: params.history.slice(-8),
+    chat_scope: params.chatScope || 'project',
+    current_planning_gate: params.currentPlanningGate || 1,
+    conversation_history: params.history.slice(-10),
     user_message: params.userMessage,
     user_profile: params.profile,
     private_vault: params.memories.slice(0, 14),
@@ -165,8 +220,6 @@ export async function runCaliTurn(params: {
     temperature: 0.65
   });
 
-  // Safety net: if user is in onboarding and Gemini forgot completed_topics on a turn,
-  // infer the next missing topic so the user is NEVER stuck on Q4.
   let completed = Array.isArray(res.data.completed_topics) ? [...res.data.completed_topics] : [];
   if (!params.profile.onboarding_complete && completed.length === 0) {
     const missing = (['name_vibe', 'design_taste', 'tech_stack', 'autonomy'] as Array<keyof OnboardingTopics>).filter(
@@ -181,6 +234,7 @@ export async function runCaliTurn(params: {
     memory_ops: Array.isArray(res.data.memory_ops) ? res.data.memory_ops : [],
     shared_candidates: Array.isArray(res.data.shared_candidates) ? res.data.shared_candidates : [],
     completed_topics: completed,
+    planning_gate: res.data.planning_gate,
     agency_command: res.data.agency_command || 'NONE',
     blueprint_markdown: res.data.blueprint_markdown
   };
