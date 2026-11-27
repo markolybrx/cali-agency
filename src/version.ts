@@ -1,6 +1,6 @@
-export const APP_VERSION = '0.8.1';
+export const APP_VERSION = '0.8.2';
 export const APP_VERSION_TAG = `v${APP_VERSION}`;
-export const APP_VERSION_CODE = 801;
+export const APP_VERSION_CODE = 802;
 
 export interface ChangelogRelease {
   version: string;
@@ -10,6 +10,15 @@ export interface ChangelogRelease {
 }
 
 export const CHANGELOG: ChangelogRelease[] = [
+  {
+    version: 'v0.8.2',
+    date: '2026-11-27',
+    title: 'Full 24-Staff 3D & 16-Bit Office + Roster Copy Sync',
+    highlights: [
+      'Upgraded pixelOffice.ts so all 24 staff members (Cali COO + 4 Directors + 4 Team Leads + 15 Specialists) appear in the 3D Office, 16-Bit 2D Office, and Mobile Grid.',
+      'Removed all legacy 24-person references from Cali prompts, onboarding, Live Voice, and UI headers so the entire studio consistently reflects the 24-person company.'
+    ]
+  },
   {
     version: 'v0.8.1',
     date: '2026-11-27',

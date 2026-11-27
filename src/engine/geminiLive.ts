@@ -30,7 +30,7 @@ const LIVE_TOOLS = [
       },
       {
         name: 'control_loop',
-        description: 'Pauses or resumes the 13-agent autonomous production loop.',
+        description: 'Pauses or resumes the 24-person autonomous production loop.',
         parameters: {
           type: 'OBJECT',
           properties: {
