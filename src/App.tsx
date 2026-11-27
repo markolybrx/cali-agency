@@ -69,9 +69,40 @@ import { CaliSignInModal } from './components/auth/CaliSignInModal';
 import { LoginGate } from './components/auth/LoginGate';
 import { ProjectHub } from './components/hub/ProjectHub';
 import { ReportsDrawer } from './components/reports/ReportsDrawer';
+import { VaultModal } from './components/vault/VaultModal';
+import {
+  decryptVaultEnvelope,
+  getRuntimeVaultPassphrase,
+  loadLocalEncryptedEnvelope,
+  readEncryptedVaultFromAndroidFolder,
+  sealAndPersistVault,
+  setRuntimeVaultPassphrase,
+  type VaultPayload
+} from './engine/cryptoVault';
+import { loadModelRouting, type ModelRoutingConfig, saveModelRouting } from './engine/modelRouter';
+import {
+  type AgentBrain,
+  exportAllAgentBrains,
+  hydrateAgentBrains,
+  importAllAgentBrains,
+  recordAgentLesson
+} from './engine/agentBrains';
+import {
+  type IdleStudySettings,
+  loadIdleStudySettings,
+  runAgentWebStudySession,
+  saveIdleStudySettings
+} from './engine/idleStudy';
 import { SuggestionBoardModal } from './components/culture/SuggestionBoardModal';
 import { CoachingLogsModal } from './components/culture/CoachingLogsModal';
 import { OrgChartModal } from './components/culture/OrgChartModal';
+import { ContractorsModal } from './components/culture/ContractorsModal';
+import {
+  getAllVisitingContractors,
+  getSummonedContractorsForProject,
+  getVisitingContractorById,
+  hydrateSpecialistsCatalog
+} from './engine/specialistsEngine';
 import { MeetingBlastOverlay, type MeetingState } from './components/meetings/MeetingBlastOverlay';
 import { BoardroomModal } from './components/meetings/BoardroomModal';
 import {
@@ -153,6 +184,12 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [vaultModalOpen, setVaultModalOpen] = useState(false);
+  const [modelRouting, setModelRouting] = useState<ModelRoutingConfig>(() => loadModelRouting());
+  const [draftRouting, setDraftRouting] = useState<ModelRoutingConfig>(() => loadModelRouting());
+  const [agentBrains, setAgentBrains] = useState<Record<string, AgentBrain>>({});
+  const [studyCfg, setStudyCfg] = useState<IdleStudySettings>(() => loadIdleStudySettings());
+  const [studyBusy, setStudyBusy] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null);
   const [suggestions, setSuggestions] = useState<TeamSuggestion[]>(() => loadSuggestions());
@@ -160,6 +197,8 @@ export default function App() {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [coachingOpen, setCoachingOpen] = useState(false);
   const [orgChartOpen, setOrgChartOpen] = useState(false);
+  const [contractorsOpen, setContractorsOpen] = useState(false);
+  const [recommendedContractorIds, setRecommendedContractorIds] = useState<string[]>([]);
   const [planningGate, setPlanningGate] = useState<1 | 2 | 3 | 4>(1);
   const [meetingState, setMeetingState] = useState<MeetingState>({
     active: false,
@@ -230,6 +269,9 @@ export default function App() {
       }
       const idbReports = await idbGetAllReports();
       setReports(idbReports);
+      await hydrateSpecialistsCatalog();
+      const brains = await hydrateAgentBrains();
+      setAgentBrains(brains);
     })();
   }, []);
 
@@ -301,6 +343,76 @@ export default function App() {
     window.setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 2800);
   };
 
+  const buildCurrentVaultPayload = (): VaultPayload => ({
+    keys: keyPool.getAll().map((k) => ({
+      id: k.id,
+      apiKey: k.apiKey,
+      selectedModel: k.selectedModel,
+      availableModels: k.availableModels
+    })),
+    github: loadGitHubConfig(),
+    modelRouting: loadModelRouting(),
+    profile: loadProfile(),
+    memories: loadMemories(),
+    agentBrains: exportAllAgentBrains(),
+    savedAt: new Date().toISOString()
+  });
+
+  const applyDecryptedVaultPayload = (payload: VaultPayload, passphrase: string, remember: boolean) => {
+    setRuntimeVaultPassphrase(passphrase, remember);
+    if (Array.isArray(payload.keys)) {
+      for (const k of payload.keys) {
+        keyPool.setKeyConfig(k.id, k.apiKey, k.selectedModel, k.availableModels);
+      }
+    }
+    if (payload.github) {
+      setGithubCfg(payload.github);
+      saveGitHubConfig(payload.github);
+    }
+    if (payload.modelRouting) {
+      setModelRouting(payload.modelRouting);
+      setDraftRouting(payload.modelRouting);
+      saveModelRouting(payload.modelRouting);
+    }
+    if (payload.profile) {
+      setProfile(payload.profile);
+      saveProfile(payload.profile);
+    }
+    if (Array.isArray(payload.memories)) {
+      setMemories(payload.memories);
+      saveMemories(payload.memories);
+    }
+    if (payload.agentBrains && typeof payload.agentBrains === 'object') {
+      void importAllAgentBrains(payload.agentBrains as Record<string, AgentBrain>).then(setAgentBrains);
+    }
+    localStorage.setItem(ACCESS_MODE_KEY, 'local');
+    setAccessMode('local');
+    if (payload.profile?.onboarding_complete) setStage('hub');
+    showToast('Vault decrypted — 5 API keys & Cali Brain restored');
+  };
+
+  // Auto-unlock local encrypted vault on boot if trusted device passphrase is remembered
+  useEffect(() => {
+    void (async () => {
+      const remembered = getRuntimeVaultPassphrase();
+      if (!remembered) return;
+      const env = (await readEncryptedVaultFromAndroidFolder()) || loadLocalEncryptedEnvelope();
+      if (!env) return;
+      try {
+        const payload = await decryptVaultEnvelope(env, remembered);
+        if (Array.isArray(payload.keys)) {
+          for (const k of payload.keys) {
+            if (k.apiKey && !keyPool.getSlot(k.id).apiKey) {
+              keyPool.setKeyConfig(k.id, k.apiKey, k.selectedModel, k.availableModels);
+            }
+          }
+        }
+      } catch {
+        // passphrase changed; user can unlock manually
+      }
+    })();
+  }, []);
+
   const handleSyncBrain = async () => {
     const res = await syncBrainFromCloud(loadProfile(), loadMemories());
     setBrainCache(res.cache);
@@ -322,6 +434,49 @@ export default function App() {
     window.addEventListener('online', onOnline);
     return () => window.removeEventListener('online', onOnline);
   }, []);
+
+  const handleRunWebStudy = async (targetAgentId?: string, bypassQuotaCap = true) => {
+    if (studyBusy || loopStatus === 'RUNNING' || meetingState.active) return;
+    setStudyBusy(true);
+    try {
+      const res = await runAgentWebStudySession({ targetAgentId, bypassQuotaCap });
+      if (!res.ok) {
+        if (bypassQuotaCap && res.reason) showToast(res.reason);
+        return;
+      }
+      setStudyCfg(loadIdleStudySettings());
+      setAgentBrains(exportAllAgentBrains());
+      if (res.report) saveReportRecord(res.report);
+      if (getRuntimeVaultPassphrase()) void sealAndPersistVault(buildCurrentVaultPayload());
+      // Animate studying agent walking to Bookshelf / Zen Room
+      const ag = agentsRef.current.find((a) => a.id === res.agentId);
+      if (ag) {
+        ag.targetX = 432;
+        ag.targetY = 332;
+        ag.speech = `Studied: ${(res.topic || '').slice(0, 26)}`;
+        ag.speechUntil = Date.now() + 6500;
+      }
+      pushActivity({
+        agentId: 'cali',
+        text: `${res.agentName} completed Web Study on "${res.topic}" (+35 XP).`,
+        kind: 'info'
+      });
+      if (bypassQuotaCap) {
+        showToast(`${res.agentName} learned new rules (+35 XP)`);
+      }
+    } finally {
+      setStudyBusy(false);
+    }
+  };
+
+  // Off-Hours Idle Web Study Scheduler (runs only when IDLE & online)
+  useEffect(() => {
+    if (!studyCfg.enabled || loopStatus !== 'IDLE' || meetingState.active || stage !== 'app') return;
+    const timer = window.setInterval(() => {
+      void handleRunWebStudy(undefined, false);
+    }, 45 * 60_000);
+    return () => clearInterval(timer);
+  }, [studyCfg.enabled, loopStatus, meetingState.active, stage]);
 
   // Periodic Cali Sitrep generator during active production
   useEffect(() => {
@@ -514,6 +669,10 @@ export default function App() {
         });
         saveReportRecord(report);
         void writeReportToLocalFolder(proj.project_name, report);
+        void recordAgentLesson(specialistId, kind === 'squad_huddle' ? 'squad_huddle' : 'coaching_pod', takeaway, taskId).then(() => {
+          setAgentBrains(exportAllAgentBrains());
+          if (getRuntimeVaultPassphrase()) void sealAndPersistVault(buildCurrentVaultPayload());
+        });
       },
       onPhaseGateReady: (proj, completedPhaseId, report) => {
         const nextPhaseId = completedPhaseId + 1;
@@ -657,6 +816,7 @@ export default function App() {
       setDraftAccent(accent);
       setDraftGithub(githubCfg);
       setDraftFolder(localFolder);
+      setDraftRouting(modelRouting);
       const nextDraft = {} as Record<KeySlotId, SettingsKeyDraft>;
       for (const k of keyPool.getAll()) {
         nextDraft[k.id] = {
@@ -668,6 +828,33 @@ export default function App() {
       setDraftKeys(nextDraft);
     }
     setActiveTab(tab);
+  };
+
+  const handleToggleSummonContractor = (contractorId: string) => {
+    if (!activeProject) {
+      showToast('Open or create a project first to summon contractors');
+      return;
+    }
+    const current = Array.isArray(activeProject.summoned_contractors) ? activeProject.summoned_contractors : [];
+    const exists = current.includes(contractorId);
+    const nextIds = exists ? current.filter((id) => id !== contractorId) : [...current, contractorId];
+    const updated: ProjectState = {
+      ...activeProject,
+      summoned_contractors: nextIds,
+      updated_at: new Date().toISOString()
+    };
+    upsertProject(updated);
+    const spec = getVisitingContractorById(contractorId);
+    if (spec) {
+      pushActivity({
+        agentId: 'cali',
+        text: exists
+          ? `Dismissed Visiting Contractor ${spec.name} (${spec.title}) from ${activeProject.project_name}.`
+          : `Summoned Visiting Contractor ${spec.name} (${spec.title}) to ${activeProject.project_name}.`,
+        kind: 'info'
+      });
+      showToast(exists ? `Dismissed ${spec.name}` : `Summoned ${spec.name} (${spec.title})`);
+    }
   };
 
   const handleSetPace = (nextPace: StudioPace) => {
@@ -707,7 +894,15 @@ export default function App() {
       const d = draftKeys[id];
       keyPool.setKeyConfig(id, d.apiKey, d.selectedModel, d.availableModels);
     });
-    showToast('Settings & 5-Key Vault saved');
+    setModelRouting(draftRouting);
+    saveModelRouting(draftRouting);
+    void sealAndPersistVault(buildCurrentVaultPayload()).then((res) => {
+      if (res.ok && res.folderSynced) {
+        showToast('Settings saved & encrypted to cali-vault.enc.json');
+      } else {
+        showToast('Settings & 5-Key Vault saved');
+      }
+    });
   };
 
   const handleExportBackup = async () => {
@@ -841,6 +1036,7 @@ export default function App() {
       setProfile(nextProfile);
       saveProfile(nextProfile);
       void pushProfileToCloud(nextProfile);
+      if (getRuntimeVaultPassphrase()) void sealAndPersistVault(buildCurrentVaultPayload());
       for (const m of nextMems.slice(0, res.memory_ops.length)) {
         void pushPrivateMemoryToCloud(m);
       }
@@ -852,6 +1048,9 @@ export default function App() {
 
       if (chatScope === 'planning' && res.planning_gate) {
         setPlanningGate(res.planning_gate);
+      }
+      if (Array.isArray(res.recommended_contractors) && res.recommended_contractors.length > 0) {
+        setRecommendedContractorIds(res.recommended_contractors);
       }
       const hasDraft = res.agency_command === 'DRAFT_BLUEPRINT' && Boolean(res.blueprint_markdown);
 
@@ -1051,6 +1250,7 @@ export default function App() {
                 showToast('Offline Local Mode active');
               }}
               onRestoreBackupFile={(f) => void restoreFromBackupFile(f)}
+              onOpenVaultUnlock={() => setVaultModalOpen(true)}
               t={t}
             />
             <CaliSignInModal
@@ -1058,6 +1258,19 @@ export default function App() {
               onClose={() => setAuthModalOpen(false)}
               brain={brainCache}
               onSyncNow={handleSyncBrain}
+              onToast={showToast}
+              t={t}
+            />
+            <VaultModal
+              open={vaultModalOpen}
+              onClose={() => setVaultModalOpen(false)}
+              onBuildCurrentPayload={buildCurrentVaultPayload}
+              onSealWithPassphrase={async (pass, rem) => {
+                setRuntimeVaultPassphrase(pass, rem);
+                const res = await sealAndPersistVault(buildCurrentVaultPayload(), pass);
+                showToast(res.folderSynced ? 'Encrypted vault saved to Documents folder' : 'Encrypted vault saved locally');
+              }}
+              onRestoreDecryptedPayload={applyDecryptedVaultPayload}
               onToast={showToast}
               t={t}
             />
@@ -1274,8 +1487,8 @@ export default function App() {
                   </button>
                 )}
 
-                {/* Company Culture Strip: Suggestions, Coaching Pods & 24-Person Org */}
-                <div className="grid grid-cols-3 gap-2">
+                {/* Company Culture Strip: Suggestions, Coaching, 24 Staff & 28 Contractors */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
                     type="button"
                     onClick={() => setSuggestionsOpen(true)}
@@ -1307,8 +1520,23 @@ export default function App() {
                     className={`rounded-2xl border p-3 text-left space-y-1 cursor-pointer ${t.surface}`}
                   >
                     <div className="text-[10px] font-mono uppercase text-accent font-semibold">4 Tiers</div>
-                    <div className="text-xs font-bold">24 Staff Org</div>
-                    <div className="text-[10px] opacity-60">View Chart</div>
+                    <div className="text-xs font-bold">24 Core Staff</div>
+                    <div className="text-[10px] opacity-60">Org Chart</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setContractorsOpen(true)}
+                    className={`relative rounded-2xl border p-3 text-left space-y-1 cursor-pointer ${t.surface}`}
+                  >
+                    {(activeProject?.summoned_contractors?.length || 0) > 0 && (
+                      <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-emerald-400" />
+                    )}
+                    <div className="text-[10px] font-mono uppercase text-accent font-semibold">On-Demand</div>
+                    <div className="text-xs font-bold">Contractors</div>
+                    <div className="text-[10px] opacity-60">
+                      {activeProject?.summoned_contractors?.length || 0} / 28 Active
+                    </div>
                   </button>
                 </div>
 
@@ -1494,6 +1722,16 @@ export default function App() {
               keys={keys}
               telemetry={telemetry}
               agentMetrics={agentMetrics}
+              agentBrains={agentBrains}
+              studyBusy={studyBusy}
+              onTriggerWebStudy={(aid) => void handleRunWebStudy(aid, true)}
+              onTeachAgentRule={(aid, rule) => {
+                void recordAgentLesson(aid, 'ceo_direct', rule).then(() => {
+                  setAgentBrains(exportAllAgentBrains());
+                  if (getRuntimeVaultPassphrase()) void sealAndPersistVault(buildCurrentVaultPayload());
+                  showToast('Saved rule to agent brain (+30 XP)');
+                });
+              }}
               agentsRef={agentsRef}
               packetsRef={packetsRef}
               productionPaused={meetingState.active}
@@ -1674,6 +1912,72 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* 0B. Local-First Zero-Knowledge Encrypted Vault */}
+                  <div className={`rounded-3xl border p-4 space-y-2.5 ${t.surface}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-[10px] font-mono uppercase tracking-widest text-accent font-semibold">
+                          AES-256-GCM Encrypted Vault
+                        </div>
+                        <div className="text-sm font-semibold">
+                          {getRuntimeVaultPassphrase() ? 'Unlocked & Auto-Saving' : 'Set Passphrase to Encrypt Keys & Brains'}
+                        </div>
+                      </div>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold border ${t.subtleBadge}`}>
+                        {getRuntimeVaultPassphrase() ? 'ACTIVE' : 'OFF'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] opacity-70">
+                      Auto-encrypts your 5 API keys, models, GitHub PAT, and Cali Brain into Documents/{localFolder}/cali-vault.enc.json so updates never require re-entering keys.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setVaultModalOpen(true)}
+                      className={`w-full py-2.5 rounded-full text-xs font-semibold cursor-pointer ${t.primaryBtn}`}
+                    >
+                      {getRuntimeVaultPassphrase() ? 'Manage / Export Encrypted Vault' : 'Setup or Unlock Encrypted Vault'}
+                    </button>
+                  </div>
+
+                  {/* 0C. Per-Role Model Routing (Heavy Builders vs Fast Utilities) */}
+                  <div className={`rounded-3xl border p-4 space-y-2.5 ${t.surface}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-widest opacity-65">
+                        Per-Role Model Routing
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDraftRouting((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                        className={`px-3 py-1 rounded-full text-[10px] font-mono font-semibold cursor-pointer ${draftRouting.enabled ? t.primaryBtn : t.secondaryBtn}`}
+                      >
+                        {draftRouting.enabled ? 'ENABLED' : 'OFF'}
+                      </button>
+                    </div>
+                    <p className="text-[11px] opacity-65">
+                      Use a stronger model for Builders, Architects &amp; Reviewers to eliminate barebones builds, and a faster model for QA/Deploy.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono opacity-60">Heavy Model (Builders/Reviewers)</label>
+                        <input
+                          value={draftRouting.heavyModel}
+                          onChange={(e) => setDraftRouting((prev) => ({ ...prev, heavyModel: e.target.value }))}
+                          placeholder="gemini-2.5-pro"
+                          className={`w-full px-3 py-2 rounded-xl text-xs font-mono border focus:outline-none ${t.input}`}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-mono opacity-60">Fast Model (QA/A11y/Deploy)</label>
+                        <input
+                          value={draftRouting.fastModel}
+                          onChange={(e) => setDraftRouting((prev) => ({ ...prev, fastModel: e.target.value }))}
+                          placeholder="gemini-2.5-flash"
+                          className={`w-full px-3 py-2 rounded-xl text-xs font-mono border focus:outline-none ${t.input}`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   {/* 1. Original Monolith Appearance (Dark Default + Light Toggle Only) */}
                   <div className={`rounded-3xl border p-4 space-y-3 ${t.surface}`}>
                     <div className="text-[11px] font-semibold uppercase tracking-widest opacity-55">
@@ -1721,6 +2025,40 @@ export default function App() {
                       placeholder="CaliAgency"
                       className={`w-full px-3.5 py-2 rounded-2xl text-xs font-mono border focus:outline-none ${t.input}`}
                     />
+                    <div className="flex items-center justify-between pt-2 border-t border-current/10">
+                      <div>
+                        <div className="text-xs font-medium">Off-Hours Idle Web Study</div>
+                        <div className="text-[10px] opacity-60">{studyCfg.todayCount}/{studyCfg.maxSessionsPerDay} sessions today</div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {[2, 4, 8].map((cap) => (
+                          <button
+                            key={cap}
+                            type="button"
+                            onClick={() => {
+                              const next = { ...studyCfg, maxSessionsPerDay: cap };
+                              setStudyCfg(next);
+                              saveIdleStudySettings(next);
+                            }}
+                            className={`px-2 py-1 rounded-full text-[10px] font-mono border cursor-pointer ${studyCfg.maxSessionsPerDay === cap ? t.primaryBtn : t.secondaryBtn}`}
+                          >
+                            {cap}/d
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = { ...studyCfg, enabled: !studyCfg.enabled };
+                            setStudyCfg(next);
+                            saveIdleStudySettings(next);
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold cursor-pointer ${studyCfg.enabled ? t.primaryBtn : t.secondaryBtn}`}
+                        >
+                          {studyCfg.enabled ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="flex items-center justify-between pt-1">
                       <span className="text-xs opacity-75">Periodic Sitrep Interval</span>
                       <div className="flex gap-1">
@@ -1970,6 +2308,13 @@ export default function App() {
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setContractorsOpen(true)}
+                      className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium border cursor-pointer ${t.subtleBadge}`}
+                    >
+                      Contractors ({activeProject?.summoned_contractors?.length || 0})
+                    </button>
                     <button
                       type="button"
                       onClick={() => {
@@ -2380,6 +2725,20 @@ export default function App() {
               t={t}
             />
             <OrgChartModal open={orgChartOpen} onClose={() => setOrgChartOpen(false)} t={t} />
+            <ContractorsModal
+              open={contractorsOpen}
+              contractors={getAllVisitingContractors()}
+              summonedIds={getSummonedContractorsForProject(activeProject).map((c) => c.id)}
+              recommendedIds={recommendedContractorIds}
+              activeProjectName={activeProject?.project_name || null}
+              onToggleSummon={handleToggleSummonContractor}
+              onInspectPrompt={(doc) => {
+                setContractorsOpen(false);
+                setCanvasDoc(doc);
+              }}
+              onClose={() => setContractorsOpen(false)}
+              t={t}
+            />
             <MeetingBlastOverlay
               meeting={meetingState}
               onEnterBoardroom={() => setMeetingState((s) => ({ ...s, showBlast: false, showBoardroom: true }))}
@@ -2389,6 +2748,19 @@ export default function App() {
               project={activeProject}
               pendingSuggestionsCount={suggestions.filter((s) => s.status === 'escalated').length}
               onAdjourn={handleAdjournBoardroom}
+              t={t}
+            />
+            <VaultModal
+              open={vaultModalOpen}
+              onClose={() => setVaultModalOpen(false)}
+              onBuildCurrentPayload={buildCurrentVaultPayload}
+              onSealWithPassphrase={async (pass, rem) => {
+                setRuntimeVaultPassphrase(pass, rem);
+                const res = await sealAndPersistVault(buildCurrentVaultPayload(), pass);
+                showToast(res.folderSynced ? 'Encrypted vault saved to Documents folder' : 'Encrypted vault saved locally');
+              }}
+              onRestoreDecryptedPayload={applyDecryptedVaultPayload}
+              onToast={showToast}
               t={t}
             />
             <ConfirmModal state={confirmState} onCancel={() => setConfirmState(null)} t={t} />

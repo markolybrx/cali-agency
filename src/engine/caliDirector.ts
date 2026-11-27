@@ -3,6 +3,7 @@ import type { ClearanceLevel, SharedMemoryItem } from './caliBrain';
 import { getPromptByRole } from '../prompts/agencyPrompts';
 import { callGeminiJson } from './geminiClient';
 import { keyPool } from './keyPool';
+import { getCompactContractorDirectoryForCali, recommendContractorsForIdea } from './specialistsEngine';
 
 export interface CaliTurnResult {
   message: string;
@@ -23,6 +24,7 @@ export interface CaliTurnResult {
   }>;
   completed_topics: Array<keyof OnboardingTopics>;
   planning_gate?: 1 | 2 | 3 | 4;
+  recommended_contractors?: string[];
   agency_command: 'NONE' | 'DRAFT_BLUEPRINT' | 'START_BLUEPRINT' | 'PAUSE_LOOP' | 'RESUME_LOOP' | 'APPROVE_PENDING';
   blueprint_markdown?: string;
 }
@@ -36,6 +38,7 @@ const CONVERSATIONAL_SYSTEM_ADDENDUM = [
   '  2. Layer 2 (private_vault): Strictly private memories for this user ONLY.',
   '  3. Clearance: If user_clearance is "BOSS", treat them as Founder & CEO (Tony Stark -> JARVIS dynamic).',
   '- If onboarding_complete is false, cover the 4 missing keys in user_profile.onboarding_topics ("name_vibe", "design_taste", "tech_stack", "autonomy") naturally and ALWAYS emit answered keys in "completed_topics".',
+  '- VISITING CONTRACTORS: You also have 28 On-Demand Visiting Contractors in visiting_contractors_directory. When a project needs specialized domain expertise (3D, Games, Pentesting, SEO/Growth, GIS, Finance, HealthTech, Native Mobile, etc.), include 1-3 matching contractor IDs in "recommended_contractors" so the Founder can summon them.',
   '- IF chat_scope === "planning" (New Project Planning Mode):',
   '  - Conduct an elaborated, deeply thoughtful 4-Gate Discovery Conversation (do NOT rush a shallow blueprint on turn 1):',
   '    * Gate 1 (Vision & Users): Ask clarifying questions about the problem, who uses it, and the core daily flow. Return planning_gate: 1.',
@@ -50,6 +53,7 @@ const CONVERSATIONAL_SYSTEM_ADDENDUM = [
   '  "shared_candidates": [],',
   '  "completed_topics": [],',
   '  "planning_gate": 1,',
+  '  "recommended_contractors": ["optional-contractor-id"],',
   '  "agency_command": "NONE | DRAFT_BLUEPRINT | START_BLUEPRINT | PAUSE_LOOP | RESUME_LOOP | APPROVE_PENDING",',
   '  "blueprint_markdown": "optional comprehensive markdown blueprint"',
   '}'
@@ -208,6 +212,7 @@ export async function runCaliTurn(params: {
           file_count: Object.keys(params.activeProject.files).length
         }
       : null,
+    visiting_contractors_directory: getCompactContractorDirectoryForCali(),
     pending_decisions: params.pendingDecisions,
     telemetry: keyPool.getTelemetry()
   };
@@ -235,6 +240,7 @@ export async function runCaliTurn(params: {
     shared_candidates: Array.isArray(res.data.shared_candidates) ? res.data.shared_candidates : [],
     completed_topics: completed,
     planning_gate: res.data.planning_gate,
+    recommended_contractors: Array.isArray(res.data.recommended_contractors) ? res.data.recommended_contractors : recommendContractorsForIdea(params.userMessage, 2).map((c) => c.id),
     agency_command: res.data.agency_command || 'NONE',
     blueprint_markdown: res.data.blueprint_markdown
   };

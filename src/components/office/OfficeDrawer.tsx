@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { AgentMetric, KeySlotState, TelemetrySummary } from '../../types/agency';
 import type { ThemeTokens } from '../../theme/themes';
+import type { AgentBrain } from '../../engine/agentBrains';
 import {
   OFFICE_HEIGHT,
   OFFICE_WIDTH,
@@ -62,10 +63,14 @@ interface OfficeDrawerProps {
   keys: KeySlotState[];
   telemetry: TelemetrySummary;
   agentMetrics: Record<string, AgentMetric>;
+  agentBrains?: Record<string, AgentBrain>;
+  studyBusy?: boolean;
   agentsRef: React.MutableRefObject<PixelSpriteAgent[]>;
   packetsRef: React.MutableRefObject<PacketFlight[]>;
   productionPaused?: boolean;
   onTriggerDemoHandoff: () => void;
+  onTriggerWebStudy?: (agentId?: string) => void;
+  onTeachAgentRule?: (agentId: string, rule: string) => void;
   onOpenTelemetry: () => void;
   onCallEmergency?: (caller: 'ceo' | 'cali') => void;
   onCallBoardroom?: () => void;
@@ -80,10 +85,14 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
   keys,
   telemetry,
   agentMetrics,
+  agentBrains = {},
+  studyBusy = false,
   agentsRef,
   packetsRef,
   productionPaused = false,
   onTriggerDemoHandoff,
+  onTriggerWebStudy,
+  onTeachAgentRule,
   onOpenTelemetry,
   onCallEmergency,
   onCallBoardroom,
@@ -94,6 +103,7 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [viewMode, setViewMode] = useState<'3d' | '2d' | 'grid'>('3d');
   const [selectedAgent, setSelectedAgent] = useState<PixelSpriteAgent | null>(null);
+  const [teachInput, setTeachInput] = useState('');
 
   useEffect(() => {
     if (!open || viewMode !== '2d') return;
@@ -126,6 +136,8 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
   };
 
   const metric = selectedAgent ? agentMetrics[selectedAgent.id] : null;
+  const brain = selectedAgent ? agentBrains[selectedAgent.id] : null;
+  const xpProgress = brain ? brain.xp % 100 : 25;
 
   return (
     <div className={`absolute inset-0 z-20 flex flex-col backdrop-blur-2xl ${t.overlay}`}>
@@ -133,7 +145,7 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
       <div className="px-4 py-3.5 border-b border-current/10 flex items-center justify-between gap-2 shrink-0">
         <div>
           <h3 className="text-base font-semibold leading-none">Cali 8-Room AI Office</h3>
-          <p className="text-[11px] opacity-60 mt-1">Engineering, Boardroom, Coaching, Pantry, Arcade &amp; Zen</p>
+          <p className="text-[11px] opacity-60 mt-1">24 Staff • Individual Brains &amp; Off-Hours Study</p>
         </div>
         <div className={`inline-flex p-1 rounded-full ${t.tabWrap}`}>
           {(['3d', '2d', 'grid'] as const).map((mode) => (
@@ -213,37 +225,28 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-              {agentsRef.current.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => setSelectedAgent({ ...a })}
-                  className={`rounded-2xl border p-3 text-left space-y-1.5 cursor-pointer ${
-                    selectedAgent?.id === a.id ? t.accentCard : t.surface
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold truncate">{a.shortName}</span>
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        productionPaused
-                          ? 'bg-rose-500'
-                          : a.state === 'CODING'
-                          ? 'bg-emerald-400'
-                          : a.state === 'BLOCKED'
-                          ? 'bg-rose-500'
-                          : a.state !== 'IDLE'
-                          ? 'bg-amber-400'
-                          : 'bg-zinc-500'
-                      }`}
-                    />
-                  </div>
-                  <div className="text-[10px] opacity-65 truncate">{a.roleLabel}</div>
-                  <div className="text-[10px] font-mono text-accent uppercase">
-                    {productionPaused ? 'PAUSED' : a.state}
-                  </div>
-                </button>
-              ))}
+              {agentsRef.current.map((a) => {
+                const b = agentBrains[a.id];
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => setSelectedAgent({ ...a })}
+                    className={`rounded-2xl border p-3 text-left space-y-1 cursor-pointer ${
+                      selectedAgent?.id === a.id ? t.accentCard : t.surface
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-semibold truncate">{a.shortName}</span>
+                      <span className="text-[9px] font-mono text-accent shrink-0">Lv {b?.level || 1}</span>
+                    </div>
+                    <div className="text-[10px] opacity-65 truncate">{a.roleLabel}</div>
+                    <div className="text-[9px] font-mono opacity-60 uppercase">
+                      {productionPaused ? 'PAUSED' : a.state} • {(b?.lessons.length || 0) + (b?.studyNotes.length || 0)} rules
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -266,36 +269,21 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
           )}
         </div>
 
-        {/* Emergency, Boardroom & Studio Controls */}
+        {/* Off-Hours Web Study & Studio Controls */}
         <div className="grid grid-cols-2 gap-2">
-          {onCallEmergency && (
+          {onTriggerWebStudy && (
             <button
               type="button"
-              onClick={() => onCallEmergency('ceo')}
-              className="rounded-2xl border border-rose-500/40 bg-rose-950/20 p-3 text-left text-xs space-y-0.5 cursor-pointer"
+              disabled={studyBusy || productionPaused}
+              onClick={() => onTriggerWebStudy(selectedAgent?.id)}
+              className={`rounded-2xl border p-3 text-left text-xs space-y-0.5 cursor-pointer disabled:opacity-45 ${t.accentCard}`}
             >
-              <div className="font-semibold text-rose-400">Call Emergency (CEO)</div>
-              <div className="text-[10px] opacity-70">Freeze floor &amp; rally board</div>
-            </button>
-          )}
-          {onCallEmergency && (
-            <button
-              type="button"
-              onClick={() => onCallEmergency('cali')}
-              className={`rounded-2xl border p-3 text-left text-xs space-y-0.5 cursor-pointer ${t.surface}`}
-            >
-              <div className="font-semibold text-accent">Test Cali Alert</div>
-              <div className="text-[10px] opacity-70">Critical bug blast demo</div>
-            </button>
-          )}
-          {onCallBoardroom && (
-            <button
-              type="button"
-              onClick={onCallBoardroom}
-              className={`rounded-2xl border p-3 text-left text-xs space-y-0.5 cursor-pointer ${t.surface}`}
-            >
-              <div className="font-semibold">Call Board Meeting</div>
-              <div className="text-[10px] opacity-70">Cali + 4 Directors</div>
+              <div className="font-semibold text-accent">
+                {studyBusy ? 'Studying Web...' : 'Send to Web Study'}
+              </div>
+              <div className="text-[10px] opacity-70 truncate">
+                {selectedAgent ? `Study for ${selectedAgent.shortName}` : 'Idle role-based research'}
+              </div>
             </button>
           )}
           {onOpenOrg && (
@@ -308,6 +296,26 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
               <div className="text-[10px] opacity-70">View 4-tier hierarchy</div>
             </button>
           )}
+          {onCallEmergency && (
+            <button
+              type="button"
+              onClick={() => onCallEmergency('ceo')}
+              className="rounded-2xl border border-rose-500/40 bg-rose-950/20 p-3 text-left text-xs space-y-0.5 cursor-pointer"
+            >
+              <div className="font-semibold text-rose-400">Call Emergency (CEO)</div>
+              <div className="text-[10px] opacity-70">Freeze floor &amp; rally board</div>
+            </button>
+          )}
+          {onCallBoardroom && (
+            <button
+              type="button"
+              onClick={onCallBoardroom}
+              className={`rounded-2xl border p-3 text-left text-xs space-y-0.5 cursor-pointer ${t.surface}`}
+            >
+              <div className="font-semibold">Call Board Meeting</div>
+              <div className="text-[10px] opacity-70">Cali + 4 Directors</div>
+            </button>
+          )}
         </div>
 
         <button
@@ -318,19 +326,32 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
           Test 3D Packet Handoff
         </button>
 
-        {/* Agent Latency & Token Inspector */}
+        {/* Individual Agent Brain, XP & Telemetry Inspector */}
         {selectedAgent && (
-          <div className={`rounded-2xl border p-4 space-y-2.5 ${t.accentCard}`}>
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold">
-                {selectedAgent.shortName} — {selectedAgent.roleLabel}
+          <div className={`rounded-3xl border p-4 space-y-3 ${t.surface}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold truncate">{selectedAgent.shortName}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${t.primaryBtn}`}>
+                    Lv {brain?.level || 1} ({brain?.xp || 25} XP)
+                  </span>
+                </div>
+                <div className="text-[11px] opacity-65 mt-0.5">{selectedAgent.roleLabel}</div>
               </div>
-              <span className="text-[10px] font-mono uppercase text-accent">{selectedAgent.state}</span>
+              <span className="text-[10px] font-mono uppercase text-accent shrink-0">{selectedAgent.state}</span>
             </div>
+
+            {/* XP Progress Bar */}
+            <div className="w-full h-1.5 rounded-full bg-current/10 overflow-hidden">
+              <div className={`h-full rounded-full ${t.dot}`} style={{ width: `${Math.max(8, xpProgress)}%` }} />
+            </div>
+
             <p className="text-[11px] opacity-85">
               {selectedAgent.speech || metric?.lastTask || 'Standing by at desk for next Delivery Manager ticket.'}
             </p>
-            <div className="grid grid-cols-4 gap-1.5 pt-1 text-center">
+
+            <div className="grid grid-cols-4 gap-1.5 text-center">
               <div className="rounded-xl bg-black/20 p-2">
                 <div className="text-[9px] opacity-55 uppercase">Calls</div>
                 <div className="text-xs font-mono font-semibold">{metric?.calls || 0}</div>
@@ -346,10 +367,72 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
                 <div className="text-xs font-mono font-semibold">{metric?.totalTokens.toLocaleString() || 0}</div>
               </div>
               <div className="rounded-xl bg-black/20 p-2">
-                <div className="text-[9px] opacity-55 uppercase">Retries</div>
-                <div className="text-xs font-mono font-semibold">{metric?.retries || 0}</div>
+                <div className="text-[9px] opacity-55 uppercase">Lessons</div>
+                <div className="text-xs font-mono font-semibold">{brain?.lessons.length || 0}</div>
               </div>
             </div>
+
+            {/* Personal Lessons Learned from Coaching & Reviews */}
+            <div className="space-y-1.5 pt-1 border-t border-current/10">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-accent font-semibold">
+                Personal Brain — Coaching Lessons ({brain?.lessons.length || 0})
+              </div>
+              {!brain || brain.lessons.length === 0 ? (
+                <p className="text-[11px] opacity-60">No coaching lessons recorded yet. Teach a rule below or run sprints.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-28 overflow-y-auto">
+                  {brain.lessons.slice(0, 5).map((les) => (
+                    <div key={les.id} className="rounded-xl bg-black/15 px-3 py-2 text-[11px] leading-snug">
+                      <span className="font-mono text-[9px] uppercase text-accent mr-1.5">[{les.source}]</span>
+                      <span>{les.rule}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Recent Web Study Notes */}
+            {brain && brain.studyNotes.length > 0 && (
+              <div className="space-y-1.5 pt-1 border-t border-current/10">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-semibold">
+                  Off-Hours Web Study Notes ({brain.studyNotes.length})
+                </div>
+                <div className="space-y-1.5 max-h-28 overflow-y-auto">
+                  {brain.studyNotes.slice(0, 4).map((st) => (
+                    <div key={st.id} className="rounded-xl bg-black/15 px-3 py-2 text-[11px] leading-snug space-y-0.5">
+                      <div className="font-semibold text-[10px] text-emerald-300">{st.topic}</div>
+                      <div className="opacity-85">{st.takeaway}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Direct CEO Rule Teaching Input */}
+            {onTeachAgentRule && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!teachInput.trim()) return;
+                  onTeachAgentRule(selectedAgent.id, teachInput);
+                  setTeachInput('');
+                }}
+                className="flex gap-1.5 pt-1"
+              >
+                <input
+                  value={teachInput}
+                  onChange={(e) => setTeachInput(e.target.value)}
+                  placeholder={`Teach ${selectedAgent.shortName} a standing rule...`}
+                  className={`flex-1 px-3 py-2 rounded-full text-xs border focus:outline-none ${t.input}`}
+                />
+                <button
+                  type="submit"
+                  className={`px-3.5 py-2 rounded-full text-xs font-semibold cursor-pointer ${t.primaryBtn}`}
+                >
+                  Teach
+                </button>
+              </form>
+            )}
           </div>
         )}
       </div>

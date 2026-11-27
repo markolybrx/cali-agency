@@ -6,6 +6,7 @@ interface LoginGateProps {
   onContinueGoogle: () => void;
   onContinueLocal: () => void;
   onRestoreBackupFile: (file: File) => void;
+  onOpenVaultUnlock?: () => void;
   t: ThemeTokens;
 }
 
@@ -13,6 +14,7 @@ export const LoginGate: React.FC<LoginGateProps> = ({
   onContinueGoogle,
   onContinueLocal,
   onRestoreBackupFile,
+  onOpenVaultUnlock,
   t
 }) => {
   const restoreRef = useRef<HTMLInputElement | null>(null);
@@ -58,13 +60,24 @@ export const LoginGate: React.FC<LoginGateProps> = ({
         </button>
 
         <div className="pt-2 flex items-center justify-between text-xs opacity-70 px-1">
-          <button
-            type="button"
-            onClick={() => restoreRef.current?.click()}
-            className="hover:underline cursor-pointer"
-          >
-            Restore Local Backup (.json)
-          </button>
+          <div className="flex items-center gap-3">
+            {onOpenVaultUnlock && (
+              <button
+                type="button"
+                onClick={onOpenVaultUnlock}
+                className="text-accent font-semibold hover:underline cursor-pointer"
+              >
+                Unlock Vault (.enc)
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => restoreRef.current?.click()}
+              className="hover:underline cursor-pointer"
+            >
+              Restore Backup
+            </button>
+          </div>
           <span className="font-mono text-[10px]">IndexedDB + Local Folder</span>
           <input
             ref={restoreRef}

@@ -70,7 +70,7 @@ export interface AgentMetric {
 export interface AgencyTask {
   task_id: string;
   title: string;
-  assigned_agent: WorkerAgentId;
+  assigned_agent: WorkerAgentId | string;
   target_files: string[];
   status: 'PENDING' | 'CODED' | 'REVIEWED' | 'DONE' | 'FAILED';
   retry_count: number;
@@ -117,6 +117,7 @@ export interface ProjectState {
   id: string;
   project_name: string;
   target_platform?: ProjectTarget;
+  summoned_contractors?: string[];
   blueprint_md: string;
   current_phase_id: number;
   tech_stack: TechStack;

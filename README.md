@@ -1,6 +1,7 @@
-# Cali — Autonomous AI Software House (`v0.8.0`)
+# Cali — Autonomous AI Software House (`v0.9.0`)
 
-Standalone Android APK & Web PWA running a **24-Person 4-Tier Autonomous Software Company** led by **Cali (COO)** with Offline-First **3-Layer JARVIS Brain**, **4-Gate Voice/Text Planning**, **Editorial Accomplishment Reports**, **Employee Suggestion Board**, **1-on-1 Coaching Pods**, **Among Us-Style Emergency & Boardroom Blast Alerts**, and an **Expanded 8-Room 3D & 16-Bit Virtual Office**.
+Standalone Android APK & Web PWA running a **24-Person Core Software Company + 28 Consolidated On-Demand Visiting Contractors** led by **Cali (COO)**, protected by a **Local-First AES-256-GCM Encrypted Vault**, **Individual Agent Brains**, **Off-Hours Grounded Web Study**, **Anti-Stub Quality Gate**, and an **8-Room 3D & 16-Bit Virtual Office**.
 
-- Works **100% offline-first** via IndexedDB (`cali_agency_db`) + live write-through to `Documents/<folder>/<project>/`.
+- **Local-First Encrypted Vault:** Auto-saves your 5 Gemini API keys, model routing, GitHub PAT, Cali Brain, and Agent Brains to `Documents/<folder>/cali-vault.enc.json`.
+- **Optional Termux Repo Importer:** Run `node ~/storage/shared/Download/compile-specialists.mjs ~/agency-agents-main` inside `~/cali-pwa-agency` to overlay your compiled `agency-agents-main` prompts into `public/specialists-catalog.json`.
 - See `ROADMAP.md` for full `vx.y.z` semantic versioning rules.

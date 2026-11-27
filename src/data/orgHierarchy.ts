@@ -1,4 +1,5 @@
 import type { ThinkingLevel, WorkerAgentId } from '../types/agency';
+import { getVisitingContractorById } from '../engine/specialistsEngine';
 
 export type OrgTier = 1 | 2 | 3 | 4;
 
@@ -303,6 +304,20 @@ export const ORG_ROSTER: OrgMember[] = [
 ];
 
 export function getOrgMemberByLegacyId(agentId: string): OrgMember {
+  const contractor = getVisitingContractorById(agentId);
+  if (contractor) {
+    return {
+      id: contractor.id,
+      name: contractor.name,
+      title: contractor.title,
+      tier: 4,
+      department: 'Engineering',
+      reportsTo: 'delivery-manager',
+      thinkingLevel: contractor.thinkingLevel,
+      keyRole: contractor.summary,
+      homeRoom: 'engineering'
+    };
+  }
   return (
     ORG_ROSTER.find((m) => m.id === agentId || m.legacyAgentId === agentId) ||
     ORG_ROSTER.find((m) => m.id === 'frontend-developer')!

@@ -13,6 +13,8 @@ import type {
 import { assembleWorkerSystemPrompt, getPromptByRole } from '../prompts/agencyPrompts';
 import { callGeminiJson } from './geminiClient';
 import { keyPool } from './keyPool';
+import { resolveModelForRole } from './modelRouter';
+import { getAgentBrainSummaryForPrompt } from './agentBrains';
 import { runStaticPreCheck } from './staticPreCheck';
 import { buildCompactProjectContext } from './contextCompactor';
 import { acquireScreenWakeLock, releaseScreenWakeLock, sendAgencyNotification } from './deviceRuntime';
@@ -249,6 +251,7 @@ export class AgencyOrchestratorLoop {
       systemPrompt: orchPrompt.content,
       userPayload: JSON.stringify({
         mode: 'INTAKE',
+        summoned_visiting_contractors: memories.filter((m) => m.key.startsWith('contractor.')).map((m) => m.value),
         target_platform: targetPlatform,
         blueprint_markdown: blueprintMd,
         user_preferences: memories.map((m) => `${m.key}: ${m.value}`)
@@ -352,12 +355,20 @@ export class AgencyOrchestratorLoop {
           keyId: key.id,
           systemPrompt,
           thinkingLevel,
+          modelOverride: resolveModelForRole(nextTask.assigned_agent),
           userPayload: JSON.stringify({
+            project_name: project.project_name,
+            target_platform: project.target_platform || "pwa",
+            summoned_contractors: project.summoned_contractors || [],
+            blueprint_markdown: project.blueprint_md,
+            active_phase: { id: phase.phase_id, name: phase.name, checklist: phase.checklist },
             tech_stack: project.tech_stack,
             task: nextTask,
             existing_files: compactCtx.target_contents,
             repo_symbol_index: compactCtx.symbol_index,
-            recent_handoffs: compactCtx.recent_handoffs
+            recent_handoffs: compactCtx.recent_handoffs,
+            agent_personal_brain: getAgentBrainSummaryForPrompt(nextTask.assigned_agent),
+            quality_mandate: "Build complete, rich, interactive, production-ready code matching blueprint_markdown. NEVER output barebones stubs or Database Initialized placeholder screens."
           })
         });
         this.hooks.onAgentMetric(nextTask.assigned_agent, Math.round(performance.now() - t0), workerRes.usage.totalTokens, nextTask.title);
@@ -438,11 +449,15 @@ export class AgencyOrchestratorLoop {
           keyId: revKey.id,
           systemPrompt: revCfg.systemPrompt,
           thinkingLevel: revCfg.thinkingLevel,
+          modelOverride: resolveModelForRole("code-reviewer"),
           userPayload: JSON.stringify({
+            project_name: project.project_name,
+            blueprint_markdown: project.blueprint_md,
             tech_stack: project.tech_stack,
             task: nextTask,
             generated_files: out.files || [],
-            handoff_notes: out.handoff_notes || []
+            handoff_notes: out.handoff_notes || [],
+            audit_rule: "Reject any barebones stub, placeholder screen, or missing interactive UI feature required by blueprint_markdown with NEEDS_REVISION."
           })
         });
         this.hooks.onAgentMetric('code-reviewer', Math.round(performance.now() - rt0), revRes.usage.totalTokens, `Audit ${nextTask.task_id}`);
@@ -524,7 +539,8 @@ export class AgencyOrchestratorLoop {
       keyId: dbgKey.id,
       systemPrompt: dbgCfg.systemPrompt,
       thinkingLevel: dbgCfg.thinkingLevel,
-      userPayload: JSON.stringify({ tech_stack: project.tech_stack, task, blockers, files: targetContents })
+      modelOverride: resolveModelForRole("debugger"),
+      userPayload: JSON.stringify({ project_name: project.project_name, blueprint_markdown: project.blueprint_md, tech_stack: project.tech_stack, task, blockers, files: targetContents })
     });
     this.hooks.onAgentMetric('debugger', Math.round(performance.now() - t0), res.usage.totalTokens, `Patch ${task.task_id}`, true);
     for (const f of res.data.files || []) {
