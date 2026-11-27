@@ -65,7 +65,7 @@ export const SuggestionBoardModal: React.FC<SuggestionBoardModalProps> = ({
 
         {showAdd && (
           <form onSubmit={handleCreate} className={`rounded-2xl border p-3.5 space-y-2.5 ${t.surface}`}>
-            <div className="text-[10px] font-mono uppercase opacity-60">Pin &amp; Escalate via Team Lead -> Director -> Cali</div>
+            <div className="text-[10px] font-mono uppercase opacity-60">Pin &amp; Escalate via Team Lead -&gt; Director -&gt; Cali</div>
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
