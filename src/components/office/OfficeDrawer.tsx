@@ -47,10 +47,10 @@ export const MiniOfficePreview: React.FC<MiniOfficeProps> = ({ agentsRef, packet
         ref={canvasRef}
         width={OFFICE_WIDTH}
         height={OFFICE_HEIGHT}
-        className="w-full h-60 sm:h-64 object-cover pixel-art block"
+        className="w-full h-56 sm:h-60 object-cover pixel-art block"
       />
       <span className="absolute bottom-2.5 right-2.5 px-3 py-1 rounded-full bg-black/80 text-white text-[10px] font-semibold backdrop-blur border border-white/15">
-        Enter 3D Office ↗
+        Enter 8-Room 3D HQ
       </span>
     </button>
   );
@@ -64,8 +64,14 @@ interface OfficeDrawerProps {
   agentMetrics: Record<string, AgentMetric>;
   agentsRef: React.MutableRefObject<PixelSpriteAgent[]>;
   packetsRef: React.MutableRefObject<PacketFlight[]>;
+  productionPaused?: boolean;
   onTriggerDemoHandoff: () => void;
   onOpenTelemetry: () => void;
+  onCallEmergency?: (caller: 'ceo' | 'cali') => void;
+  onCallBoardroom?: () => void;
+  onOpenSuggestions?: () => void;
+  onOpenOrg?: () => void;
+  onReturnToBoardroom?: () => void;
 }
 
 export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
@@ -76,8 +82,14 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
   agentMetrics,
   agentsRef,
   packetsRef,
+  productionPaused = false,
   onTriggerDemoHandoff,
-  onOpenTelemetry
+  onOpenTelemetry,
+  onCallEmergency,
+  onCallBoardroom,
+  onOpenSuggestions,
+  onOpenOrg,
+  onReturnToBoardroom
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [viewMode, setViewMode] = useState<'3d' | '2d' | 'grid'>('3d');
@@ -89,7 +101,9 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
     let tick = 0;
     const loop = () => {
       tick += 1;
-      stepOfficeSimulation(agentsRef.current, packetsRef.current, tick);
+      if (!productionPaused) {
+        stepOfficeSimulation(agentsRef.current, packetsRef.current, tick);
+      }
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -99,7 +113,7 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [open, viewMode, agentsRef, packetsRef, selectedAgent?.id]);
+  }, [open, viewMode, productionPaused, agentsRef, packetsRef, selectedAgent?.id]);
 
   if (!open) return null;
 
@@ -118,8 +132,8 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
       {/* Header + 3D / 2D / Grid Switcher */}
       <div className="px-4 py-3.5 border-b border-current/10 flex items-center justify-between gap-2 shrink-0">
         <div>
-          <h3 className="text-base font-semibold leading-none">Cali 3D AI Office</h3>
-          <p className="text-[11px] opacity-60 mt-1">13 Agents + Cali Suite • Interactive Three.js</p>
+          <h3 className="text-base font-semibold leading-none">Cali 8-Room AI Office</h3>
+          <p className="text-[11px] opacity-60 mt-1">Engineering, Boardroom, Coaching, Pantry, Arcade &amp; Zen</p>
         </div>
         <div className={`inline-flex p-1 rounded-full ${t.tabWrap}`}>
           {(['3d', '2d', 'grid'] as const).map((mode) => (
@@ -176,54 +190,125 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
 
       {/* Main Office Viewport */}
       <div className="flex-1 overflow-y-auto p-4 pb-28 space-y-3">
-        {viewMode === '3d' ? (
-          <Claw3DOffice
-            agentsRef={agentsRef}
-            packetsRef={packetsRef}
-            selectedAgentId={selectedAgent?.id || null}
-            onSelectAgent={setSelectedAgent}
-          />
-        ) : viewMode === '2d' ? (
-          <div className="rounded-2xl overflow-hidden border border-current/15 shadow-xl bg-[#3D2716]">
-            <canvas
-              ref={canvasRef}
-              width={OFFICE_WIDTH}
-              height={OFFICE_HEIGHT}
-              onClick={handleCanvasClick}
-              className="w-full h-auto block pixel-art cursor-pointer"
+        <div className="relative">
+          {viewMode === '3d' ? (
+            <Claw3DOffice
+              agentsRef={agentsRef}
+              packetsRef={packetsRef}
+              selectedAgentId={selectedAgent?.id || null}
+              productionPaused={productionPaused}
+              onSelectAgent={setSelectedAgent}
+              onPressEmergencyButton={() => onCallEmergency?.('ceo')}
+              onTapSuggestionWall={() => onOpenSuggestions?.()}
             />
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-            {agentsRef.current.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => setSelectedAgent({ ...a })}
-                className={`rounded-2xl border p-3 text-left space-y-1.5 cursor-pointer ${
-                  selectedAgent?.id === a.id ? t.accentCard : t.surface
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold truncate">{a.shortName}</span>
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      a.state === 'CODING'
-                        ? 'bg-emerald-400'
-                        : a.state === 'BLOCKED'
-                        ? 'bg-rose-500'
-                        : a.state !== 'IDLE'
-                        ? 'bg-amber-400'
-                        : 'bg-zinc-500'
-                    }`}
-                  />
-                </div>
-                <div className="text-[10px] opacity-65 truncate">{a.roleLabel}</div>
-                <div className="text-[10px] font-mono text-accent uppercase">{a.state}</div>
-              </button>
-            ))}
-          </div>
-        )}
+          ) : viewMode === '2d' ? (
+            <div className="rounded-2xl overflow-hidden border border-current/15 shadow-xl bg-[#3D2716]">
+              <canvas
+                ref={canvasRef}
+                width={OFFICE_WIDTH}
+                height={OFFICE_HEIGHT}
+                onClick={handleCanvasClick}
+                className="w-full h-auto block pixel-art cursor-pointer"
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {agentsRef.current.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => setSelectedAgent({ ...a })}
+                  className={`rounded-2xl border p-3 text-left space-y-1.5 cursor-pointer ${
+                    selectedAgent?.id === a.id ? t.accentCard : t.surface
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold truncate">{a.shortName}</span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        productionPaused
+                          ? 'bg-rose-500'
+                          : a.state === 'CODING'
+                          ? 'bg-emerald-400'
+                          : a.state === 'BLOCKED'
+                          ? 'bg-rose-500'
+                          : a.state !== 'IDLE'
+                          ? 'bg-amber-400'
+                          : 'bg-zinc-500'
+                      }`}
+                    />
+                  </div>
+                  <div className="text-[10px] opacity-65 truncate">{a.roleLabel}</div>
+                  <div className="text-[10px] font-mono text-accent uppercase">
+                    {productionPaused ? 'PAUSED' : a.state}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {productionPaused && (
+            <div className="absolute inset-0 rounded-2xl bg-rose-950/75 backdrop-blur-[2px] flex flex-col items-center justify-center text-center p-4">
+              <span className="px-3 py-1 rounded-full bg-rose-600 text-white text-[10px] font-mono font-bold tracking-wider">
+                PRODUCTION PAUSED
+              </span>
+              <div className="font-bold text-white text-base mt-2">Boardroom Meeting In Session</div>
+              {onReturnToBoardroom && (
+                <button
+                  type="button"
+                  onClick={onReturnToBoardroom}
+                  className="mt-3 px-4 py-2 rounded-full bg-white text-zinc-900 text-xs font-bold cursor-pointer"
+                >
+                  Return to Boardroom
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Emergency, Boardroom & Studio Controls */}
+        <div className="grid grid-cols-2 gap-2">
+          {onCallEmergency && (
+            <button
+              type="button"
+              onClick={() => onCallEmergency('ceo')}
+              className="rounded-2xl border border-rose-500/40 bg-rose-950/20 p-3 text-left text-xs space-y-0.5 cursor-pointer"
+            >
+              <div className="font-semibold text-rose-400">Call Emergency (CEO)</div>
+              <div className="text-[10px] opacity-70">Freeze floor &amp; rally board</div>
+            </button>
+          )}
+          {onCallEmergency && (
+            <button
+              type="button"
+              onClick={() => onCallEmergency('cali')}
+              className={`rounded-2xl border p-3 text-left text-xs space-y-0.5 cursor-pointer ${t.surface}`}
+            >
+              <div className="font-semibold text-accent">Test Cali Alert</div>
+              <div className="text-[10px] opacity-70">Critical bug blast demo</div>
+            </button>
+          )}
+          {onCallBoardroom && (
+            <button
+              type="button"
+              onClick={onCallBoardroom}
+              className={`rounded-2xl border p-3 text-left text-xs space-y-0.5 cursor-pointer ${t.surface}`}
+            >
+              <div className="font-semibold">Call Board Meeting</div>
+              <div className="text-[10px] opacity-70">Cali + 4 Directors</div>
+            </button>
+          )}
+          {onOpenOrg && (
+            <button
+              type="button"
+              onClick={onOpenOrg}
+              className={`rounded-2xl border p-3 text-left text-xs space-y-0.5 cursor-pointer ${t.surface}`}
+            >
+              <div className="font-semibold">24-Staff Org Chart</div>
+              <div className="text-[10px] opacity-70">View 4-tier hierarchy</div>
+            </button>
+          )}
+        </div>
 
         <button
           type="button"
@@ -243,7 +328,7 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
               <span className="text-[10px] font-mono uppercase text-accent">{selectedAgent.state}</span>
             </div>
             <p className="text-[11px] opacity-85">
-              {selectedAgent.speech || metric?.lastTask || 'Standing by at desk for next Master Orchestrator ticket.'}
+              {selectedAgent.speech || metric?.lastTask || 'Standing by at desk for next Delivery Manager ticket.'}
             </p>
             <div className="grid grid-cols-4 gap-1.5 pt-1 text-center">
               <div className="rounded-xl bg-black/20 p-2">
@@ -253,7 +338,7 @@ export const OfficeDrawer: React.FC<OfficeDrawerProps> = ({
               <div className="rounded-xl bg-black/20 p-2">
                 <div className="text-[9px] opacity-55 uppercase">Latency</div>
                 <div className="text-xs font-mono font-semibold">
-                  {metric ? `${(metric.lastLatencyMs / 1000).toFixed(1)}s` : '—'}
+                  {metric ? `${(metric.lastLatencyMs / 1000).toFixed(1)}s` : '-'}
                 </div>
               </div>
               <div className="rounded-xl bg-black/20 p-2">

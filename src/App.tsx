@@ -72,6 +72,8 @@ import { ReportsDrawer } from './components/reports/ReportsDrawer';
 import { SuggestionBoardModal } from './components/culture/SuggestionBoardModal';
 import { CoachingLogsModal } from './components/culture/CoachingLogsModal';
 import { OrgChartModal } from './components/culture/OrgChartModal';
+import { MeetingBlastOverlay, type MeetingState } from './components/meetings/MeetingBlastOverlay';
+import { BoardroomModal } from './components/meetings/BoardroomModal';
 import {
   type CoachingSession,
   createCoachingRecord,
@@ -159,6 +161,15 @@ export default function App() {
   const [coachingOpen, setCoachingOpen] = useState(false);
   const [orgChartOpen, setOrgChartOpen] = useState(false);
   const [planningGate, setPlanningGate] = useState<1 | 2 | 3 | 4>(1);
+  const [meetingState, setMeetingState] = useState<MeetingState>({
+    active: false,
+    kind: 'boardroom',
+    caller: 'ceo',
+    reason: '',
+    showBlast: false,
+    showBoardroom: false,
+    wasRunningBefore: false
+  });
 
   const [loopStatus, setLoopStatus] = useState<'IDLE' | 'RUNNING' | 'PAUSED' | 'WATCHDOG' | 'DEMO'>('IDLE');
   const [hubTab, setHubTab] = useState<'feed' | 'agents' | 'checklist' | 'watchdog'>('feed');
@@ -240,6 +251,50 @@ export default function App() {
       chatBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [messages.length, chatOpen, chatBusy]);
+
+  const triggerMeetingBlast = (kind: 'emergency' | 'boardroom', caller: 'ceo' | 'cali', customReason?: string) => {
+    const wasRunning = orchestratorRef.current?.isRunning() || false;
+    if (wasRunning) {
+      orchestratorRef.current?.pause();
+    }
+    const defaultReason =
+      kind === 'emergency' && caller === 'cali'
+        ? 'Cali (COO) detected a critical blocker or multi-retry defect. Production is frozen until resolved.'
+        : kind === 'emergency'
+        ? 'Founder & CEO pressed the Emergency Meeting Button. All 24 staff halting active work and rallying to the Boardroom.'
+        : 'Cali (COO) and the 4 Department Directors are convening in the Glass Boardroom for executive review.';
+
+    setMeetingState({
+      active: true,
+      kind,
+      caller,
+      reason: customReason || defaultReason,
+      showBlast: true,
+      showBoardroom: false,
+      wasRunningBefore: wasRunning
+    });
+  };
+
+  const handleAdjournBoardroom = (minutesReport: AgencyReport) => {
+    const shouldResume = meetingState.wasRunningBefore;
+    saveReportRecord(minutesReport);
+    if (activeProject) {
+      void writeReportToLocalFolder(activeProject.project_name, minutesReport);
+    }
+    setMeetingState({
+      active: false,
+      kind: 'boardroom',
+      caller: 'ceo',
+      reason: '',
+      showBlast: false,
+      showBoardroom: false,
+      wasRunningBefore: false
+    });
+    showToast('Boardroom adjourned — minutes saved & production resumed');
+    if (shouldResume && activeProject) {
+      void orchestratorRef.current?.runLoop(activeProject);
+    }
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -526,7 +581,11 @@ export default function App() {
           { ...dec, id: `dec_${Date.now().toString(36)}`, createdAt: new Date().toISOString() },
           ...prev
         ]);
-        showToast('Cali staged a pending decision');
+        if (dec.kind === 'CIRCUIT_BREAKER') {
+          triggerMeetingBlast('emergency', 'cali', `${dec.title}: ${dec.detail}`);
+        } else {
+          showToast('Cali staged a pending decision');
+        }
       },
       onLoopStatus: (st) => setLoopStatus(st)
     });
@@ -1109,6 +1168,13 @@ export default function App() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => triggerMeetingBlast('boardroom', 'ceo')}
+                    className={`px-2.5 py-1.5 rounded-full text-[10px] font-semibold border cursor-pointer ${t.accentCard}`}
+                  >
+                    Board
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setTheme(theme === 'monolith' ? 'light' : 'monolith')}
                     className={`px-2.5 py-1.5 rounded-full text-[10px] font-semibold border cursor-pointer ${t.secondaryBtn}`}
                   >
@@ -1430,8 +1496,14 @@ export default function App() {
               agentMetrics={agentMetrics}
               agentsRef={agentsRef}
               packetsRef={packetsRef}
+              productionPaused={meetingState.active}
               onTriggerDemoHandoff={triggerRandomHandoff}
               onOpenTelemetry={() => switchToTab('telemetry')}
+              onCallEmergency={(caller) => triggerMeetingBlast('emergency', caller)}
+              onCallBoardroom={() => triggerMeetingBlast('boardroom', 'ceo')}
+              onOpenSuggestions={() => setSuggestionsOpen(true)}
+              onOpenOrg={() => setOrgChartOpen(true)}
+              onReturnToBoardroom={() => setMeetingState((s) => ({ ...s, showBlast: false, showBoardroom: true }))}
             />
 
             <WorkspaceDrawer
@@ -2308,6 +2380,17 @@ export default function App() {
               t={t}
             />
             <OrgChartModal open={orgChartOpen} onClose={() => setOrgChartOpen(false)} t={t} />
+            <MeetingBlastOverlay
+              meeting={meetingState}
+              onEnterBoardroom={() => setMeetingState((s) => ({ ...s, showBlast: false, showBoardroom: true }))}
+            />
+            <BoardroomModal
+              meeting={meetingState}
+              project={activeProject}
+              pendingSuggestionsCount={suggestions.filter((s) => s.status === 'escalated').length}
+              onAdjourn={handleAdjournBoardroom}
+              t={t}
+            />
             <ConfirmModal state={confirmState} onCancel={() => setConfirmState(null)} t={t} />
           </>
         )}

@@ -17,3 +17,38 @@
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .text-accent { color: var(--text-accent, #FFB732); }
 canvas.pixel-art { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+@keyframes hazardSlide {
+  0% { background-position: 0 0; }
+  100% { background-position: 80px 0; }
+}
+@keyframes blastPop {
+  0% { transform: scale(0.86); opacity: 0; }
+  55% { transform: scale(1.03); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.hazard-stripes-emergency {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(220, 38, 38, 0.94),
+    rgba(220, 38, 38, 0.94) 20px,
+    rgba(127, 29, 29, 0.96) 20px,
+    rgba(127, 29, 29, 0.96) 40px
+  );
+  background-size: 80px 80px;
+  animation: hazardSlide 1.15s linear infinite;
+}
+.hazard-stripes-boardroom {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(109, 40, 217, 0.94),
+    rgba(109, 40, 217, 0.94) 20px,
+    rgba(76, 29, 149, 0.96) 20px,
+    rgba(76, 29, 149, 0.96) 40px
+  );
+  background-size: 80px 80px;
+  animation: hazardSlide 1.35s linear infinite;
+}
+.blast-pop {
+  animation: blastPop 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}

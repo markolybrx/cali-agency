@@ -13,13 +13,14 @@ export const CHANGELOG: ChangelogRelease[] = [
   {
     version: 'v0.8.0',
     date: '2026-11-27',
-    title: 'Parts A & B: 24-Person Company, Deep Prompts, 4-Gate Planning, Suggestions & Coaching',
+    title: '24-Person Autonomous Software Company, 8-Room Office, Editorial Reports & Blast Alerts',
     highlights: [
-      'Part B: Realistic 4-Tier 24-Person Company Org Hierarchy (CEO -> COO -> 4 Directors -> 4 Team Leads -> 15 Specialists) with interactive Org Chart.',
-      'Part B: Rebuilt all 24 staff prompts to deep 7-part agency-agents standard (Identity, Mission, Guardrails, Deliverables, Escalation, Handoffs, Strict JSON).',
-      'Part B: 4-Gate Elaborated Project Planning in Chat & Voice (Vision -> MVP & Pushback -> Architecture & UI Taste -> Full Blueprint Canvas).',
-      'Part B: Employee Suggestion Board (Specialist -> Team Lead -> Director -> Cali -> CEO escalation with grey-out CTAs) and 1-on-1 Coaching / Squad Huddle Engine.',
-      'Part A: Login Gate -> Onboarding -> Project Selection Hub -> Scoped Dashboard, IndexedDB + Live Local Folder Sync, Editorial Reports Hub, and Original Monolith Dark/Light Mode.'
+      'New Entry Flow: Login Gate (Google Sign-In or Offline Local Save) -> Onboarding -> Project Selection Hub -> Scoped Dashboard.',
+      'Realistic 4-Tier 24-Person Org Hierarchy (CEO -> COO -> 4 Directors -> 4 Team Leads -> 15 Specialists) with deep 7-part agency-agents prompts.',
+      '4-Gate Elaborated Project Planning (Text + Voice), Employee Suggestion Board (full escalation chain), and 1-on-1 Coaching Pods / Squad Huddles.',
+      'Among Us-style Emergency & Boardroom Blast Alert (callable by CEO or automatically by Cali on critical bugs) with hard production pause & auto-resume.',
+      'Expanded 8-Room 3D & 16-Bit Office preserving existing art while adding Red Emergency Button, Coaching Pod, Suggestion Wall, Pantry, Arcade, and Zen Room.',
+      'IndexedDB + Live Local Folder Sync, atomic Phase 1 -> Phase 2 fix, grey-out Chat CTAs, Editorial Reports Hub, Canvas Viewer, and Original Monolith Dark/Light Mode.'
     ]
   },
   {
